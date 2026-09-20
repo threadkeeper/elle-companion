@@ -1,6 +1,6 @@
 # Elle Status
 
-Updated: 18 September 2026
+Updated: 20 September 2026
 
 ## Alignment experiment
 
@@ -22,11 +22,12 @@ behaviour, not whether an agent genuinely experiences compassion or empathy.
 
 ## Live demo
 
-- Hosted agent: Elle v22 at 100% traffic.
+- Hosted agent: Elle v26 at 100% traffic.
 - Model: `gpt-5.6-luna`.
 - Private actions: direct HTTPS calls to the Rust bridge.
-- Storage: encrypted, user-partitioned Cosmos memory.
-- Private backend: revision 22, healthy on image `7c9347e`.
+- Storage: encrypted, user-partitioned Cosmos cognitive records in
+	`GaiaDataLake`, `GaiaKB`, `GaiaDiary` and `GaiaConnections`.
+- Private backend: revision 26, healthy on image `3e0d211`.
 - Wisdom backend: revision 21, healthy on image `d74b019`.
 - Web demo: revision 6, healthy and pinned to Elle v22.
 
@@ -51,6 +52,13 @@ Elle v22 adds direct Shared Wisdom search and confirmed contribution actions.
 The Wisdom bridge requires the exact Elle service identity, its API client ID,
 and the `Continuity.Access` application role. A fresh v22 session retrieved the
 reviewed "small reversible steps" entry while the bridge logged HTTP 200.
+
+Elle v26 uses the Gaia-compatible cognitive schema for automatic retrieval,
+daily conversation archiving and durable-fact assessment. Production checks
+confirmed one owner/day DataLake record, exact retry deduplication, two unique
+KB facts, fresh-session recall of both facts and no cross-owner record matches.
+The provisioning manifest no longer creates `GaiaXPosts`, `GaiaXAuth`,
+`GaiaCardAssets` or `GaiaCardWallets`.
 
 The authenticated web path measured 21.555 seconds browser end to end for a
 new-session save, including 10.350 seconds in Foundry; warm private recall took
