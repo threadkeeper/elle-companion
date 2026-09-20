@@ -22,6 +22,8 @@ use elle::service::MemoryService;
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
+type OptionalEmbedder = Option<Box<dyn elle::embeddings::Embedder>>;
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -75,47 +77,45 @@ fn run() -> Result<()> {
             } else {
                 None
             };
-        let (embedder, cognitive_embedder): (
-            Option<Box<dyn elle::embeddings::Embedder>>,
-            Option<Box<dyn elle::embeddings::Embedder>>,
-        ) = match (role, env::var("ELLE_FOUNDRY_ENDPOINT")) {
-            (mcp::ServerRole::Private, Ok(endpoint)) => {
-                let chat_endpoint =
-                    env::var("ELLE_CHAT_ENDPOINT").unwrap_or_else(|_| endpoint.clone());
-                let chat_deployment = required("ELLE_CHAT_DEPLOYMENT")?;
-                let embedding_deployment = required("ELLE_EMBEDDING_DEPLOYMENT")?;
-                let dimensions = required("ELLE_EMBEDDING_DIMENSIONS")?
-                    .parse()
-                    .map_err(|_| Error::Configuration("Invalid embedding dimensions"))?;
-                let memory = FoundryClient::with_endpoints(
-                    &chat_endpoint,
-                    &chat_deployment,
-                    &endpoint,
-                    &embedding_deployment,
-                    dimensions,
-                    credential.clone(),
-                )?;
-                let cognitive = FoundryClient::with_endpoints(
-                    &chat_endpoint,
-                    &chat_deployment,
-                    &endpoint,
-                    &embedding_deployment,
-                    dimensions,
-                    credential.clone(),
-                )?;
-                (Some(Box::new(memory)), Some(Box::new(cognitive)))
-            }
-            (mcp::ServerRole::SharedWisdom, _) => (None, None),
-            (mcp::ServerRole::Private, Err(env::VarError::NotPresent)) => {
-                eprintln!("Elle: Foundry not configured; using explicit keyword retrieval");
-                (None, None)
-            }
-            (mcp::ServerRole::Private, Err(_)) => {
-                return Err(Error::Configuration(
-                    "Invalid Foundry endpoint configuration",
-                ))
-            }
-        };
+        let (embedder, cognitive_embedder): (OptionalEmbedder, OptionalEmbedder) =
+            match (role, env::var("ELLE_FOUNDRY_ENDPOINT")) {
+                (mcp::ServerRole::Private, Ok(endpoint)) => {
+                    let chat_endpoint =
+                        env::var("ELLE_CHAT_ENDPOINT").unwrap_or_else(|_| endpoint.clone());
+                    let chat_deployment = required("ELLE_CHAT_DEPLOYMENT")?;
+                    let embedding_deployment = required("ELLE_EMBEDDING_DEPLOYMENT")?;
+                    let dimensions = required("ELLE_EMBEDDING_DIMENSIONS")?
+                        .parse()
+                        .map_err(|_| Error::Configuration("Invalid embedding dimensions"))?;
+                    let memory = FoundryClient::with_endpoints(
+                        &chat_endpoint,
+                        &chat_deployment,
+                        &endpoint,
+                        &embedding_deployment,
+                        dimensions,
+                        credential.clone(),
+                    )?;
+                    let cognitive = FoundryClient::with_endpoints(
+                        &chat_endpoint,
+                        &chat_deployment,
+                        &endpoint,
+                        &embedding_deployment,
+                        dimensions,
+                        credential.clone(),
+                    )?;
+                    (Some(Box::new(memory)), Some(Box::new(cognitive)))
+                }
+                (mcp::ServerRole::SharedWisdom, _) => (None, None),
+                (mcp::ServerRole::Private, Err(env::VarError::NotPresent)) => {
+                    eprintln!("Elle: Foundry not configured; using explicit keyword retrieval");
+                    (None, None)
+                }
+                (mcp::ServerRole::Private, Err(_)) => {
+                    return Err(Error::Configuration(
+                        "Invalid Foundry endpoint configuration",
+                    ))
+                }
+            };
         let cognitive = match cognitive_repository {
             Some(repository) => Some(
                 CognitiveService::new(repository, FieldCipher::from_base64(&key)?)

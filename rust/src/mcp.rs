@@ -80,7 +80,7 @@ pub fn handle_for_role_with_cognitive(
     owner: &OwnerId,
     service: &mut MemoryService,
     role: ServerRole,
-    mut cognitive: Option<&mut CognitiveService>,
+    cognitive: Option<&mut CognitiveService>,
 ) -> Option<Value> {
     if body.len() > MAX_MESSAGE_BYTES {
         return Some(protocol_error(
@@ -176,7 +176,7 @@ pub fn handle_for_role_with_cognitive(
                 ));
             }
             let execution = if role.allows(name) {
-                call_tool(name, arguments, owner, service, cognitive.as_deref_mut())
+                call_tool(name, arguments, owner, service, cognitive)
             } else {
                 Err(Error::Unauthorized)
             };
