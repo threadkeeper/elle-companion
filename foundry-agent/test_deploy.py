@@ -78,9 +78,10 @@ class DeploymentTests(unittest.TestCase):
 
         self.assertIn("30% positive, 40% neutral and 30% negative", instructions)
         self.assertIn(
-            "Every completed user/Elle turn is archived to private memory automatically",
+            "After every reply, the completed turn is appended",
             instructions,
         )
+        self.assertIn("checked for newly attained durable knowledge", instructions)
         self.assertIn("Use `elle_shared_wisdom`", instructions)
 
     def test_staging_honors_model_override(self):

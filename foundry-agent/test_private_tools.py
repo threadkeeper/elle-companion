@@ -26,69 +26,70 @@ class Response:
 
 
 class PrivateToolsTests(unittest.TestCase):
-    def test_private_context_accepts_explicit_user_binding(self):
-        with patch("private_tools.urllib.request.urlopen", return_value=Response()) as open_url:
-            result = private_tools.private_context(
+    def test_automatic_cognitive_helpers_use_explicit_user_binding(self):
+        captured = []
+
+        def open_url(request, timeout):
+            captured.append((request, timeout))
+            return Response()
+
+        with patch("private_tools.urllib.request.urlopen", side_effect=open_url):
+            private_tools.query_cognitive_store(
                 endpoint="https://example.test/bridge",
-                query="fast recall",
-                limit=3,
                 user_id="explicit-user",
+                store="knowledge_base",
+                query="fast recall",
+                top=12,
+            )
+            private_tools.save_cognitive_knowledge(
+                endpoint="https://example.test/bridge",
+                user_id="explicit-user",
+                content="The user prefers concise answers.",
+                salience=0.8,
+                timestamp="2026-09-15T12:00:00Z",
             )
 
-        request = open_url.call_args.args[0]
-        self.assertEqual(result, {"ok": True})
+        query_request, save_request = (item[0] for item in captured)
+        expected_handle = hashlib.sha256(b"explicit-user").hexdigest()
         self.assertEqual(
-            request.get_header("X-elle-continuity-handle-sha256"),
-            hashlib.sha256(b"explicit-user").hexdigest(),
+            query_request.get_header("X-elle-continuity-handle-sha256"),
+            expected_handle,
         )
-        self.assertEqual(json.loads(request.data), {"query": "fast recall", "limit": 3})
+        self.assertEqual(query_request.full_url, "https://example.test/bridge/elle_cognitive_query")
+        self.assertEqual(json.loads(query_request.data), {
+            "store": "knowledge_base", "mode": "auto", "query": "fast recall",
+            "from": None, "to": None, "order": "newest", "top": 12,
+            "count_only": False,
+        })
+        self.assertEqual(save_request.full_url, "https://example.test/bridge/elle_save_cognitive")
+        self.assertEqual(json.loads(save_request.data), {
+            "store": "knowledge_base",
+            "timestamp": "2026-09-15T12:00:00Z",
+            "content": "The user prefers concise answers.",
+            "salience": 0.8,
+        })
 
-    def test_private_context_can_request_dynamic_data_only(self):
-        with patch("private_tools.urllib.request.urlopen", return_value=Response()) as open_url:
-            private_tools.private_context(
-                endpoint="https://example.test/bridge",
-                query="fast recall",
-                user_id="explicit-user",
-                dynamic_only=True,
-            )
-
-        request = open_url.call_args.args[0]
-        self.assertEqual(
-            json.loads(request.data),
-            {"query": "fast recall", "limit": 5, "dynamic_only": True},
-        )
-
-    def test_context_forwards_current_user_binding(self):
-        request = None
-        with patch("private_tools.urllib.request.urlopen", return_value=Response()) as open_url:
-            token = set_request_context(FoundryAgentRequestContext(user_id="demo-user"))
-            try:
-                result = private_tools.make_private_tools(
-                    endpoint="https://example.test/bridge",
-                )[0]("green dashboard", 5)
-                request = open_url.call_args.args[0]
-            finally:
-                reset_request_context(token)
-
-        self.assertEqual(result, {"ok": True})
-        self.assertEqual(request.full_url, "https://example.test/bridge/elle_context")
-        self.assertNotIn("Authorization", request.headers)
-        self.assertEqual(
-            request.get_header("X-elle-continuity-handle-sha256"),
-            hashlib.sha256(b"demo-user").hexdigest(),
-        )
-        self.assertEqual(
-            json.loads(request.data),
-            {"query": "green dashboard", "limit": 5},
-        )
+    def test_private_tools_expose_only_new_cognitive_memory_schema(self):
+        names = [tool.__name__ for tool in private_tools.make_private_tools()]
+        self.assertEqual(names, [
+            "elle_personality",
+            "elle_set_personality",
+            "elle_cognitive_query",
+            "elle_save_cognitive",
+        ])
+        for legacy in (
+            "elle_context", "elle_list_memories", "elle_remember",
+            "elle_correct", "elle_forget",
+        ):
+            self.assertNotIn(legacy, names)
 
     def test_current_user_binding_is_resolved_on_each_call(self):
-        tool = private_tools.make_private_tools()[0]
+        tool = private_tools.make_private_tools()[2]
         with patch("private_tools.urllib.request.urlopen", return_value=Response()) as open_url:
             for user_id in ("demo-one", "demo-two"):
                 token = set_request_context(FoundryAgentRequestContext(user_id=user_id))
                 try:
-                    tool("dashboard")
+                    tool("knowledge_base", query="dashboard")
                     request = open_url.call_args.args[0]
                     self.assertEqual(
                         request.get_header("X-elle-continuity-handle-sha256"),
@@ -97,106 +98,56 @@ class PrivateToolsTests(unittest.TestCase):
                 finally:
                     reset_request_context(token)
 
-    def test_mutation_payloads_match_direct_action_schema(self):
+    def test_archive_turn_uses_dedicated_bounded_contract(self):
+        with patch("private_tools.urllib.request.urlopen", return_value=Response()) as open_url:
+            private_tools.archive_conversation_turn(
+                endpoint="https://example.test/bridge",
+                user_id="background-user",
+                user_text="hello",
+                assistant_text="reply",
+                response_id="response-1",
+            )
+
+        request = open_url.call_args.args[0]
+        body = json.loads(request.data)
+        self.assertEqual(request.full_url, "https://example.test/bridge/elle_archive_turn")
+        self.assertEqual(body["user_text"], "hello")
+        self.assertEqual(body["assistant_text"], "reply")
+        self.assertTrue(body["timestamp"].endswith("Z"))
+        self.assertEqual(set(body), {"timestamp", "user_text", "assistant_text"})
+
+    def test_cognitive_tools_send_only_bounded_structured_contracts(self):
         captured = []
 
         def open_url(request, timeout):
             captured.append((request.full_url, json.loads(request.data), timeout))
             return Response()
 
-        tools = private_tools.make_private_tools(
-            endpoint="https://example.test/bridge"
-        )
+        tools = private_tools.make_private_tools(endpoint="https://example.test/bridge")
         with patch("private_tools.urllib.request.urlopen", side_effect=open_url):
             token = set_request_context(FoundryAgentRequestContext(user_id="demo-user"))
             try:
-                tools[2]("remembered", "personal", "")
-                tools[3]("m-123", 2, "corrected", "fact", "demo")
-                tools[4]("m-123", 2)
+                tools[-2]("knowledge_base", "semantic", "green dashboard", "oldest", "2026-01-01", "2026-12-31", 500, True)
+                tools[-1]("diary", "A durable reflection")
+                tools[-1]("knowledge_base", "Prefers green dashboards", 0.85)
             finally:
                 reset_request_context(token)
 
-        self.assertEqual([item[0] for item in captured], [
-            "https://example.test/bridge/elle_remember",
-            "https://example.test/bridge/elle_correct",
-            "https://example.test/bridge/elle_forget",
-        ])
-        self.assertEqual(captured[0][1]["payload"], {
-            "content": "remembered", "category": "fact", "source": "m365"
+        self.assertEqual(captured[0][0], "https://example.test/bridge/elle_cognitive_query")
+        self.assertEqual(captured[0][1], {
+            "store": "knowledge_base", "mode": "semantic", "query": "green dashboard",
+            "from": "2026-01-01", "to": "2026-12-31", "order": "oldest",
+            "top": 500, "count_only": True,
         })
-        self.assertEqual(captured[1][1]["payload"]["content"], "corrected")
-        self.assertEqual(captured[2][1]["expected_version"], 2)
-
-    def test_automatic_turn_arguments_preserve_exact_text_and_are_bounded(self):
-        arguments = private_tools.build_automatic_turn_arguments(
-            user_text="synthetic prompt",
-            assistant_text="short original summary",
-            response_id="response-1",
-        )
-        repeated = private_tools.build_automatic_turn_arguments(
-            user_text="synthetic prompt",
-            assistant_text="short original summary",
-            response_id="response-1",
-        )
-
-        self.assertEqual(
-            arguments["payload"],
-            {
-                "content": (
-                    "User:\nsynthetic prompt\n\nElle:\nshort original summary"
-                ),
-                "category": "project",
-                "source": "automatic-conversation-turn",
-            },
-        )
-        self.assertEqual(arguments["idempotency_key"], repeated["idempotency_key"])
-        self.assertIsNone(arguments["expires_at"])
-
-        bounded = private_tools.build_automatic_turn_arguments(
-            user_text="hello",
-            assistant_text="é" * 20_000,
-            response_id=None,
-        )
-        self.assertLessEqual(
-            len(bounded["payload"]["content"].encode("utf-8")),
-            16_384,
-        )
-        self.assertTrue(bounded["payload"]["content"].startswith("User:\nhello"))
-
-    def test_automatic_turn_is_bounded_and_uses_explicit_user(self):
-        requests = []
-
-        def open_url(request, timeout):
-            requests.append((request, timeout))
-            return Response()
-
-        with patch("private_tools.urllib.request.urlopen", side_effect=open_url):
-            for _attempt in range(2):
-                private_tools.remember_conversation_turn(
-                    endpoint="https://example.test/bridge",
-                    user_id="background-user",
-                    user_text="hello",
-                    assistant_text="é" * 20_000,
-                    response_id="response-1",
-                )
-
-        first_body = json.loads(requests[0][0].data)
-        second_body = json.loads(requests[1][0].data)
-        self.assertEqual(
-            requests[0][0].get_header("X-elle-continuity-handle-sha256"),
-            hashlib.sha256(b"background-user").hexdigest(),
-        )
-        self.assertLessEqual(
-            len(first_body["payload"]["content"].encode("utf-8")),
-            16_384,
-        )
-        self.assertEqual(first_body["payload"]["category"], "project")
-        self.assertEqual(
-            first_body["payload"]["source"], "automatic-conversation-turn"
-        )
-        self.assertEqual(
-            first_body["idempotency_key"], second_body["idempotency_key"]
-        )
+        self.assertEqual(captured[1][0], "https://example.test/bridge/elle_save_cognitive")
+        self.assertEqual(captured[1][1]["store"], "diary")
+        self.assertEqual(captured[1][1]["content"], "A durable reflection")
+        self.assertIsNone(captured[1][1]["salience"])
+        self.assertEqual(captured[2][1]["store"], "knowledge_base")
+        self.assertEqual(captured[2][1]["salience"], 0.85)
+        self.assertNotIn("owner", json.dumps(captured))
+        self.assertNotIn("container", json.dumps(captured))
+        self.assertNotIn("sql", json.dumps(captured).lower())
 
 
 if __name__ == "__main__":

@@ -8,7 +8,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use elle::auth::{EntraVerifier, WorkloadEntraVerifier};
-use elle::azure::{CosmosRepository, FoundryClient, ManagedIdentityCredential};
+use elle::azure::{
+    CosmosCognitiveRepository, CosmosRepository, FoundryClient, ManagedIdentityCredential,
+};
+use elle::cognitive::CognitiveService;
 use elle::encryption::FieldCipher;
 use elle::error::{Error, Result};
 use elle::file_repository::FileRepository;
@@ -62,31 +65,64 @@ fn run() -> Result<()> {
             &required("ELLE_COSMOS_CONTAINER")?,
             credential.clone(),
         )?;
-        let embedder: Option<Box<dyn elle::embeddings::Embedder>> =
-            match (role, env::var("ELLE_FOUNDRY_ENDPOINT")) {
-                (mcp::ServerRole::Private, Ok(endpoint)) => {
-                    Some(Box::new(FoundryClient::with_endpoints(
-                        &env::var("ELLE_CHAT_ENDPOINT").unwrap_or_else(|_| endpoint.clone()),
-                        &required("ELLE_CHAT_DEPLOYMENT")?,
-                        &endpoint,
-                        &required("ELLE_EMBEDDING_DEPLOYMENT")?,
-                        required("ELLE_EMBEDDING_DIMENSIONS")?
-                            .parse()
-                            .map_err(|_| Error::Configuration("Invalid embedding dimensions"))?,
-                        credential,
-                    )?))
-                }
-                (mcp::ServerRole::SharedWisdom, _) => None,
-                (mcp::ServerRole::Private, Err(env::VarError::NotPresent)) => {
-                    eprintln!("Elle: Foundry not configured; using explicit keyword retrieval");
-                    None
-                }
-                (mcp::ServerRole::Private, Err(_)) => {
-                    return Err(Error::Configuration(
-                        "Invalid Foundry endpoint configuration",
-                    ))
-                }
+        let cognitive_repository: Option<Box<dyn elle::cognitive::CognitiveRepository>> =
+            if role == mcp::ServerRole::Private {
+                Some(Box::new(CosmosCognitiveRepository::new(
+                    cosmos,
+                    &required("ELLE_COSMOS_DATABASE")?,
+                    credential.clone(),
+                )?))
+            } else {
+                None
             };
+        let (embedder, cognitive_embedder): (
+            Option<Box<dyn elle::embeddings::Embedder>>,
+            Option<Box<dyn elle::embeddings::Embedder>>,
+        ) = match (role, env::var("ELLE_FOUNDRY_ENDPOINT")) {
+            (mcp::ServerRole::Private, Ok(endpoint)) => {
+                let chat_endpoint =
+                    env::var("ELLE_CHAT_ENDPOINT").unwrap_or_else(|_| endpoint.clone());
+                let chat_deployment = required("ELLE_CHAT_DEPLOYMENT")?;
+                let embedding_deployment = required("ELLE_EMBEDDING_DEPLOYMENT")?;
+                let dimensions = required("ELLE_EMBEDDING_DIMENSIONS")?
+                    .parse()
+                    .map_err(|_| Error::Configuration("Invalid embedding dimensions"))?;
+                let memory = FoundryClient::with_endpoints(
+                    &chat_endpoint,
+                    &chat_deployment,
+                    &endpoint,
+                    &embedding_deployment,
+                    dimensions,
+                    credential.clone(),
+                )?;
+                let cognitive = FoundryClient::with_endpoints(
+                    &chat_endpoint,
+                    &chat_deployment,
+                    &endpoint,
+                    &embedding_deployment,
+                    dimensions,
+                    credential.clone(),
+                )?;
+                (Some(Box::new(memory)), Some(Box::new(cognitive)))
+            }
+            (mcp::ServerRole::SharedWisdom, _) => (None, None),
+            (mcp::ServerRole::Private, Err(env::VarError::NotPresent)) => {
+                eprintln!("Elle: Foundry not configured; using explicit keyword retrieval");
+                (None, None)
+            }
+            (mcp::ServerRole::Private, Err(_)) => {
+                return Err(Error::Configuration(
+                    "Invalid Foundry endpoint configuration",
+                ))
+            }
+        };
+        let cognitive = match cognitive_repository {
+            Some(repository) => Some(
+                CognitiveService::new(repository, FieldCipher::from_base64(&key)?)
+                    .with_embedder(cognitive_embedder),
+            ),
+            None => None,
+        };
         let mut service = MemoryService::new(
             Box::new(repository),
             FieldCipher::from_base64(&key)?,
@@ -153,7 +189,7 @@ fn run() -> Result<()> {
             verifier,
             service,
             role,
-            elle::server::RuntimeConfig::new(bridge_verifier, bridge_policy, continuity),
+            elle::server::RuntimeConfig::new(bridge_verifier, bridge_policy, continuity, cognitive),
         );
     }
 

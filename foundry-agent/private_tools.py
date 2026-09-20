@@ -3,8 +3,8 @@ import json
 import logging
 import urllib.error
 import urllib.request
-import uuid
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from azure.ai.agentserver.core import get_request_context
@@ -17,18 +17,7 @@ _DEFAULT_ENDPOINT = (
 )
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _TIMEOUT_SECONDS = 20
-_MEMORY_CATEGORIES = {"fact", "preference", "project"}
 _MAX_MEMORY_CONTENT_BYTES = 16_384
-
-
-def _memory_payload(content: Any, category: Any, source: Any) -> dict[str, str]:
-    normalized_category = category if category in _MEMORY_CATEGORIES else "fact"
-    normalized_source = source if isinstance(source, str) and source.strip() else "m365"
-    return {
-        "content": str(content),
-        "category": normalized_category,
-        "source": normalized_source,
-    }
 
 
 def _bounded_text(value: str, maximum_bytes: int) -> str:
@@ -39,11 +28,9 @@ def _bounded_text(value: str, maximum_bytes: int) -> str:
 
 
 def build_automatic_turn_arguments(
-    *,
-    user_text: str,
-    assistant_text: str,
-    response_id: str | None,
+    *, user_text: str, assistant_text: str, response_id: str | None
 ) -> dict[str, Any]:
+    """Build the deprecated legacy payload used only by historical demo tooling."""
     content = _bounded_text(
         f"User:\n{user_text}\n\nElle:\n{assistant_text}",
         _MAX_MEMORY_CONTENT_BYTES,
@@ -57,6 +44,19 @@ def build_automatic_turn_arguments(
         },
         "idempotency_key": f"turn-{hashlib.sha256(key_material).hexdigest()}",
         "expires_at": None,
+    }
+
+
+def build_archive_turn_arguments(
+    *, user_text: str, assistant_text: str, timestamp: str | None = None
+) -> dict[str, str]:
+    """Build the bounded dedicated cognitive archive payload."""
+    bounded_user = _bounded_text(user_text, _MAX_MEMORY_CONTENT_BYTES // 2)
+    remaining = _MAX_MEMORY_CONTENT_BYTES - len(bounded_user.encode("utf-8"))
+    return {
+        "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "user_text": bounded_user,
+        "assistant_text": _bounded_text(assistant_text, remaining),
     }
 
 
@@ -95,7 +95,7 @@ def _request_tool(
     return json.loads(body)
 
 
-def remember_conversation_turn(
+def archive_conversation_turn(
     *,
     endpoint: str | None,
     user_id: str,
@@ -104,70 +104,70 @@ def remember_conversation_turn(
     response_id: str | None,
 ) -> Any:
     """Persist one completed conversation turn outside the model tool loop."""
+    del response_id
     return _request_tool(
         endpoint or _DEFAULT_ENDPOINT,
-        "elle_remember",
-        build_automatic_turn_arguments(
+        "elle_archive_turn",
+        build_archive_turn_arguments(
             user_text=user_text,
             assistant_text=assistant_text,
-            response_id=response_id,
         ),
         user_id=user_id,
     )
 
 
-def private_context(
+def query_cognitive_store(
     *,
     endpoint: str | None,
-    query: str,
-    limit: int = 5,
-    user_id: str | None = None,
-    dynamic_only: bool = False,
+    user_id: str,
+    store: str,
+    mode: str = "auto",
+    query: str | None = None,
+    order: str = "newest",
+    top: int | None = None,
 ) -> Any:
-    arguments: dict[str, Any] = {"query": query, "limit": limit}
-    if dynamic_only:
-        arguments["dynamic_only"] = True
+    """Retrieve bounded new-schema cognitive context for automatic turn handling."""
     return _request_tool(
         endpoint or _DEFAULT_ENDPOINT,
-        "elle_context",
-        arguments,
+        "elle_cognitive_query",
+        {
+            "store": store,
+            "mode": mode,
+            "query": query,
+            "from": None,
+            "to": None,
+            "order": order,
+            "top": top,
+            "count_only": False,
+        },
+        user_id=user_id,
+    )
+
+
+def save_cognitive_knowledge(
+    *,
+    endpoint: str | None,
+    user_id: str,
+    content: str,
+    salience: float,
+    timestamp: str | None = None,
+) -> Any:
+    """Persist one automatically attained fact through the new cognitive schema."""
+    return _request_tool(
+        endpoint or _DEFAULT_ENDPOINT,
+        "elle_save_cognitive",
+        {
+            "store": "knowledge_base",
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "content": content,
+            "salience": salience,
+        },
         user_id=user_id,
     )
 
 
 def make_private_tools(*, endpoint: str | None = None) -> list[Callable[..., Any]]:
     endpoint = endpoint or _DEFAULT_ENDPOINT
-
-    def elle_context(query: str, limit: int = 5) -> Any:
-        """Recall relevant private Elle memories and personality guidance."""
-        return private_context(endpoint=endpoint, query=query, limit=limit)
-
-    def elle_list_memories() -> Any:
-        """List the user's live private Elle memories, IDs, versions, and sources."""
-        return _request_tool(endpoint, "elle_list_memories", {})
-
-    def elle_remember(content: str, category: str, source: str) -> Any:
-        """Save one private Elle memory after the user has confirmed it."""
-        return _request_tool(endpoint, "elle_remember", {
-            "payload": _memory_payload(content, category, source),
-            "idempotency_key": str(uuid.uuid4()),
-            "expires_at": None,
-        })
-
-    def elle_correct(memory_id: str, expected_version: int, content: str, category: str, source: str) -> Any:
-        """Correct one private Elle memory using its current reviewed version."""
-        return _request_tool(endpoint, "elle_correct", {
-            "id": memory_id,
-            "expected_version": expected_version,
-            "payload": _memory_payload(content, category, source),
-        })
-
-    def elle_forget(memory_id: str, expected_version: int) -> Any:
-        """Delete one private Elle memory using its current reviewed version."""
-        return _request_tool(endpoint, "elle_forget", {
-            "id": memory_id,
-            "expected_version": expected_version,
-        })
 
     def elle_personality() -> Any:
         """Open the user's private Elle personality workshop."""
@@ -180,12 +180,44 @@ def make_private_tools(*, endpoint: str | None = None) -> list[Callable[..., Any
             "settings": settings,
         })
 
+    def elle_cognitive_query(
+        store: str,
+        mode: str = "auto",
+        query: str | None = None,
+        order: str = "newest",
+        from_date: str | None = None,
+        to_date: str | None = None,
+        top: int | None = None,
+        count_only: bool = False,
+    ) -> Any:
+        """Retrieve an owner-scoped cognitive store using bounded structured options."""
+        return _request_tool(endpoint, "elle_cognitive_query", {
+            "store": store,
+            "mode": mode,
+            "query": query,
+            "from": from_date,
+            "to": to_date,
+            "order": order,
+            "top": top,
+            "count_only": count_only,
+        })
+
+    def elle_save_cognitive(
+        store: str,
+        content: str,
+        salience: float | None = None,
+    ) -> Any:
+        """Deliberately save one durable knowledge-base fact or diary reflection."""
+        return _request_tool(endpoint, "elle_save_cognitive", {
+            "store": store,
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "content": content,
+            "salience": salience,
+        })
+
     return [
-        elle_context,
-        elle_list_memories,
-        elle_remember,
-        elle_correct,
-        elle_forget,
         elle_personality,
         elle_set_personality,
+        elle_cognitive_query,
+        elle_save_cognitive,
     ]

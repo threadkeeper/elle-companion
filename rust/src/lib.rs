@@ -5,6 +5,7 @@
 pub mod archive;
 pub mod auth;
 pub mod azure;
+pub mod cognitive;
 pub mod embeddings;
 pub mod encryption;
 pub mod error;

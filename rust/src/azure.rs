@@ -14,6 +14,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use zeroize::Zeroizing;
 
+use crate::cognitive::{CognitiveRecord, CognitiveRepository, CognitiveStore};
 use crate::embeddings::Embedder;
 use crate::error::{Error, Result};
 use crate::repository::{MemoryRepository, StoredRecord};
@@ -450,6 +451,199 @@ impl MemoryRepository for CosmosRepository {
     }
 }
 
+/// Cosmos repository for Elle's fixed, encrypted cognitive containers.
+pub struct CosmosCognitiveRepository {
+    endpoint: String,
+    token_resource: String,
+    database: String,
+    credential: Arc<dyn TokenProvider>,
+    agent: ureq::Agent,
+}
+
+impl CosmosCognitiveRepository {
+    /// Configure the existing Elle database; container names are fixed by [`CognitiveStore`].
+    pub fn new(endpoint: &str, database: &str, credential: Arc<dyn TokenProvider>) -> Result<Self> {
+        let endpoint = azure_origin(endpoint, ".documents.azure.com")?;
+        if !safe_segment(database) {
+            return Err(Error::Configuration("Invalid Cosmos database identifier"));
+        }
+        Ok(Self {
+            token_resource: format!("{endpoint}/"),
+            endpoint,
+            database: database.to_owned(),
+            credential,
+            agent: http_agent(30),
+        })
+    }
+
+    fn request(
+        &self,
+        method: &str,
+        store: CognitiveStore,
+        owner: &str,
+        id: Option<&str>,
+    ) -> Result<ureq::Request> {
+        let partition = partition_header(owner)?;
+        let suffix = match id {
+            Some(id) => {
+                validate_id(id)?;
+                format!("/{id}")
+            }
+            None => String::new(),
+        };
+        let token = Zeroizing::new(self.credential.token(&self.token_resource)?);
+        validate_token(&token)?;
+        let authorization = Zeroizing::new(aad_auth_header(&token));
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| Error::Configuration("System clock must be after Unix epoch"))?;
+        let date = rfc1123(now.as_secs())?;
+        let path = format!(
+            "/dbs/{}/colls/{}/docs{suffix}",
+            self.database,
+            store.container()
+        );
+        Ok(self
+            .agent
+            .request(method, &format!("{}{}", self.endpoint, path))
+            .set("Authorization", &authorization)
+            .set("x-ms-version", "2018-12-31")
+            .set("x-ms-date", &date)
+            .set("x-ms-documentdb-partitionkey", &partition)
+            .set("Content-Type", "application/json"))
+    }
+
+    fn read_record(
+        &self,
+        store: CognitiveStore,
+        owner: &str,
+        id: &str,
+    ) -> Result<Option<(CognitiveRecord, String)>> {
+        let response = match self.request("GET", store, owner, Some(id))?.call() {
+            Err(ureq::Error::Status(404, _)) => return Ok(None),
+            result => checked_response(result, &[200])?,
+        };
+        let etag = response
+            .header("etag")
+            .filter(|value| valid_etag(value))
+            .ok_or(Error::Storage("Cosmos response is missing a valid ETag"))?
+            .to_owned();
+        let body = read_body(response, MAX_DOCUMENT)?;
+        let record = parse_cognitive_record(
+            serde_json::from_slice(&body)
+                .map_err(|_| Error::Storage("Invalid Cosmos cognitive document JSON"))?,
+            store,
+            owner,
+        )?;
+        if record.id != id {
+            return Err(Error::Storage(
+                "Cosmos returned a different cognitive identifier",
+            ));
+        }
+        Ok(Some((record, etag)))
+    }
+}
+
+impl CognitiveRepository for CosmosCognitiveRepository {
+    fn get(
+        &self,
+        store: CognitiveStore,
+        owner_id: &str,
+        id: &str,
+    ) -> Result<Option<CognitiveRecord>> {
+        Ok(self
+            .read_record(store, owner_id, id)?
+            .map(|(record, _)| record))
+    }
+
+    fn list(&self, store: CognitiveStore, owner_id: &str) -> Result<Vec<CognitiveRecord>> {
+        let payload = json!({
+            "query": "SELECT * FROM c WHERE c.owner_id = @owner",
+            "parameters": [{"name": "@owner", "value": owner_id}]
+        })
+        .to_string();
+        let mut records = Vec::new();
+        let mut ids = HashSet::new();
+        let mut seen_tokens = HashSet::new();
+        let mut continuation: Option<String> = None;
+        let mut remaining_bytes = MAX_BODY;
+        for _ in 0..MAX_RECORDS {
+            let mut request = self
+                .request("POST", store, owner_id, None)?
+                .set("Content-Type", "application/query+json")
+                .set("x-ms-documentdb-isquery", "true")
+                .set("x-ms-max-item-count", "100");
+            if let Some(token) = &continuation {
+                request = request.set("x-ms-continuation", token);
+            }
+            let response = checked_response(request.send_bytes(payload.as_bytes()), &[200])?;
+            continuation = response
+                .header("x-ms-continuation")
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+            if let Some(token) = &continuation {
+                if !safe_header(token, MAX_TOKEN) || !seen_tokens.insert(token.clone()) {
+                    return Err(Error::Storage("Invalid or repeated Cosmos continuation"));
+                }
+            }
+            let body = read_body(response, remaining_bytes)?;
+            remaining_bytes -= body.len();
+            let page = parse_cognitive_documents(&body, store, owner_id)?;
+            if records.len().saturating_add(page.len()) > MAX_RECORDS {
+                return Err(Error::Storage("Cognitive listing exceeds 1000 records"));
+            }
+            for record in page {
+                if !ids.insert(record.id.clone()) {
+                    return Err(Error::Storage(
+                        "Cognitive listing returned a duplicate record",
+                    ));
+                }
+                records.push(record);
+            }
+            if continuation.is_none() {
+                return Ok(records);
+            }
+        }
+        Err(Error::Storage("Cognitive listing exceeds pagination limit"))
+    }
+
+    fn create(&mut self, record: &CognitiveRecord) -> Result<bool> {
+        let body = cognitive_document_body(record)?;
+        let result = self
+            .request("POST", record.store, &record.owner_id, None)?
+            .set("If-None-Match", "*")
+            .send_bytes(&body);
+        match result {
+            Err(ureq::Error::Status(409 | 412, _)) => Ok(false),
+            result => {
+                checked_response(result, &[201])?;
+                Ok(true)
+            }
+        }
+    }
+
+    fn replace(&mut self, record: &CognitiveRecord, expected_version: u64) -> Result<()> {
+        if expected_version == 0 || expected_version.checked_add(1) != Some(record.version) {
+            return Err(Error::InvalidInput(
+                "Replacement must increment the expected version",
+            ));
+        }
+        let body = cognitive_document_body(record)?;
+        let (current, etag) = self
+            .read_record(record.store, &record.owner_id, &record.id)?
+            .ok_or(Error::NotFound)?;
+        if current.version != expected_version {
+            return Err(Error::Conflict);
+        }
+        let request = with_if_match(
+            self.request("PUT", record.store, &record.owner_id, Some(&record.id))?,
+            &etag,
+        )?;
+        checked_response(request.send_bytes(&body), &[200])?;
+        Ok(())
+    }
+}
+
 fn http_agent(seconds: u64) -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(seconds))
@@ -651,6 +845,69 @@ fn document_body(record: &StoredRecord) -> Result<Vec<u8>> {
         ));
     }
     Ok(body)
+}
+
+fn cognitive_document_body(record: &CognitiveRecord) -> Result<Vec<u8>> {
+    validate_id(&record.id)?;
+    partition_header(&record.owner_id)?;
+    if record.ciphertext.is_empty() || record.version == 0 {
+        return Err(Error::InvalidInput(
+            "Encrypted cognitive document and positive version are required",
+        ));
+    }
+    let body = serde_json::to_vec(record)
+        .map_err(|_| Error::InvalidInput("Could not encode encrypted cognitive document"))?;
+    if body.len() > MAX_DOCUMENT {
+        return Err(Error::InvalidInput(
+            "Encrypted cognitive document exceeds Cosmos size limit",
+        ));
+    }
+    Ok(body)
+}
+
+fn parse_cognitive_record(
+    mut value: Value,
+    store: CognitiveStore,
+    owner: &str,
+) -> Result<CognitiveRecord> {
+    let object = value
+        .as_object_mut()
+        .ok_or(Error::Storage("Invalid Cosmos cognitive document"))?;
+    for name in ["_rid", "_self", "_etag", "_attachments", "_ts"] {
+        object.remove(name);
+    }
+    let record: CognitiveRecord = serde_json::from_value(value)
+        .map_err(|_| Error::Storage("Invalid Cosmos cognitive document fields"))?;
+    if record.owner_id != owner || record.store != store {
+        return Err(Error::Unauthorized);
+    }
+    if !safe_segment(&record.id) || record.version == 0 || record.ciphertext.is_empty() {
+        return Err(Error::Storage(
+            "Invalid persisted encrypted cognitive document",
+        ));
+    }
+    Ok(record)
+}
+
+fn parse_cognitive_documents(
+    body: &[u8],
+    store: CognitiveStore,
+    owner: &str,
+) -> Result<Vec<CognitiveRecord>> {
+    #[derive(Deserialize)]
+    struct Page {
+        #[serde(rename = "Documents")]
+        documents: Vec<Value>,
+    }
+    let page: Page = serde_json::from_slice(body)
+        .map_err(|_| Error::Storage("Invalid Cosmos cognitive query response"))?;
+    if page.documents.len() > MAX_RECORDS {
+        return Err(Error::Storage("Cognitive listing exceeds 1000 records"));
+    }
+    page.documents
+        .into_iter()
+        .map(|value| parse_cognitive_record(value, store, owner))
+        .collect()
 }
 
 fn parse_record(mut value: Value, owner: &str) -> Result<StoredRecord> {

@@ -16,6 +16,7 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 use zeroize::Zeroizing;
 
 use crate::auth::{EntraVerifier, WorkloadEntraVerifier};
+use crate::cognitive::CognitiveService;
 use crate::error::{Error, Result};
 use crate::identity::OwnerId;
 use crate::mcp;
@@ -109,12 +110,6 @@ impl ContinuityBindings {
         }
         self.owners.get(handle)
     }
-
-    fn demo_owner(&self) -> Option<&OwnerId> {
-        (self.owners.len() == 1)
-            .then(|| self.owners.values().next())
-            .flatten()
-    }
 }
 
 impl ContinuityConfig {
@@ -192,6 +187,7 @@ struct RuntimeState {
     verifier: EntraVerifier,
     bridge_verifier: Option<BridgeVerifier>,
     service: MemoryService,
+    cognitive: Option<CognitiveService>,
     role: mcp::ServerRole,
     continuity: Option<ContinuityConfig>,
 }
@@ -201,6 +197,7 @@ pub struct RuntimeConfig {
     bridge_verifier: Option<BridgeVerifier>,
     bridge_policy: Option<BridgePolicy>,
     continuity: Option<ContinuityConfig>,
+    cognitive: Option<CognitiveService>,
 }
 
 impl RuntimeConfig {
@@ -209,11 +206,13 @@ impl RuntimeConfig {
         bridge_verifier: Option<BridgeVerifier>,
         bridge_policy: Option<BridgePolicy>,
         continuity: Option<ContinuityConfig>,
+        cognitive: Option<CognitiveService>,
     ) -> Self {
         Self {
             bridge_verifier,
             bridge_policy,
             continuity,
+            cognitive,
         }
     }
 }
@@ -247,6 +246,7 @@ pub fn serve(
         verifier,
         bridge_verifier: runtime.bridge_verifier,
         service,
+        cognitive: runtime.cognitive,
         role,
         continuity: runtime.continuity,
     };
@@ -373,7 +373,13 @@ fn handle_request(
         }
     };
     let (rpc_method, tool_name) = request_summary(&body);
-    match mcp::handle_for_role(&body, &owner, &mut state.service, state.role) {
+    match mcp::handle_for_role_with_cognitive(
+        &body,
+        &owner,
+        &mut state.service,
+        state.role,
+        state.cognitive.as_mut(),
+    ) {
         Some(response) => {
             let error = response_error(&response);
             eprintln!(
@@ -549,9 +555,9 @@ fn handle_bridge(
             match state.continuity.as_ref() {
                 Some(continuity) if valid_continuity_handle(handle) => continuity
                     .bindings
-                    .demo_owner()
+                    .owner_for(handle)
                     .cloned()
-                    .ok_or("demo_owner_unavailable"),
+                    .ok_or("user_binding_unavailable"),
                 None => Err("user_binding_unavailable"),
                 _ => Err("user_binding_rejected"),
             }
@@ -581,7 +587,14 @@ fn handle_bridge(
         }
     };
     let arguments = Value::Object(arguments);
-    match mcp::invoke_for_role(tool_name, arguments, &owner, &mut state.service, state.role) {
+    match mcp::invoke_for_role(
+        tool_name,
+        arguments,
+        &owner,
+        &mut state.service,
+        state.role,
+        state.cognitive.as_mut(),
+    ) {
         Ok(value) => {
             eprintln!(
                 "Elle diagnostic: request_id={request_id} role={} bridge_tool={} status=200 result=ok",
@@ -1070,6 +1083,7 @@ mod tests {
                 verifier,
                 bridge_verifier: None,
                 service: MemoryService::new(Box::new(repository), FieldCipher::new([7; 32]), None),
+                cognitive: None,
                 role,
                 continuity,
             };
@@ -1144,6 +1158,7 @@ mod tests {
                     FieldCipher::new([7; 32]),
                     None,
                 ),
+                cognitive: None,
                 role: mcp::ServerRole::SharedWisdom,
                 continuity: None,
             };
@@ -1603,14 +1618,22 @@ mod tests {
     }
 
     #[test]
-    fn direct_bridge_uses_demo_owner_for_any_valid_handle() {
-        let request = "POST /bridge/elle_list_memories HTTP/1.1\r\nHost: localhost\r\nX-Elle-Continuity-Handle-SHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+    fn direct_bridge_requires_the_exact_bound_handle() {
+        let request = format!("POST /bridge/elle_list_memories HTTP/1.1\r\nHost: localhost\r\nX-Elle-Continuity-Handle-SHA256: {HANDLE}\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{{}}");
         let response = raw_response_for(
             request.as_bytes(),
             mcp::ServerRole::Private,
             Some(signed_continuity_config()),
         );
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+
+        let unknown = "POST /bridge/elle_list_memories HTTP/1.1\r\nHost: localhost\r\nX-Elle-Continuity-Handle-SHA256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+        let response = raw_response_for(
+            unknown.as_bytes(),
+            mcp::ServerRole::Private,
+            Some(signed_continuity_config()),
+        );
+        assert!(response.starts_with("HTTP/1.1 401 "), "{response}");
     }
 
     #[test]

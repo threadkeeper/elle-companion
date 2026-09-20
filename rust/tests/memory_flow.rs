@@ -265,7 +265,10 @@ fn mcp_preserves_identity_boundary_and_notifications_cannot_mutate() {
     let tools = mcp::definitions();
     for tool in tools {
         assert_eq!(tool["inputSchema"]["additionalProperties"], false);
-        assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        assert_eq!(
+            tool["annotations"]["readOnlyHint"],
+            tool["name"] != "elle_save_cognitive"
+        );
         assert_eq!(tool["annotations"]["destructiveHint"], false);
     }
     let malformed = mcp::handle(b"{", &user, &mut service).unwrap();
@@ -367,7 +370,10 @@ fn private_and_shared_servers_expose_disjoint_tools() {
     let private_names = names(&private);
     let wisdom_names = names(&wisdom);
     assert!(private_names.is_disjoint(&wisdom_names));
-    assert!(private_names.contains("elle_remember"));
+    assert!(private_names.contains("elle_cognitive_query"));
+    assert!(private_names.contains("elle_save_cognitive"));
+    assert!(!private_names.contains("elle_remember"));
+    assert!(!private_names.contains("elle_context"));
     assert!(!private_names.contains("elle_contribute_wisdom"));
     assert!(wisdom_names.contains("elle_shared_wisdom"));
     assert!(wisdom_names.contains("elle_contribute_wisdom"));

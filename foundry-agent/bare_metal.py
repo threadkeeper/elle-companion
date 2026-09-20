@@ -6,7 +6,7 @@ from typing import Any
 from agent_framework import ContextProvider, Message
 from azure.ai.agentserver.core import get_request_context
 
-from private_tools import private_context
+from private_tools import query_cognitive_store
 
 
 BARE_METAL_INSTRUCTIONS = (
@@ -26,18 +26,13 @@ def _bounded_query(value: str) -> str:
 
 
 def _memory_texts(private_data: Any) -> list[str]:
-    if not isinstance(private_data, dict):
-        raise RuntimeError("Private context returned an invalid response")
-    recall = private_data.get("recall")
-    memories = recall.get("memories") if isinstance(recall, dict) else None
-    if not isinstance(memories, list):
-        raise RuntimeError("Private context returned an invalid response")
+    if not isinstance(private_data, dict) or not isinstance(private_data.get("items"), list):
+        raise RuntimeError("Cognitive context returned an invalid response")
     texts = []
-    for memory in memories:
-        payload = memory.get("payload") if isinstance(memory, dict) else None
-        content = payload.get("content") if isinstance(payload, dict) else None
+    for memory in private_data["items"]:
+        content = memory.get("text") if isinstance(memory, dict) else None
         if not isinstance(content, str) or not content.strip():
-            raise RuntimeError("Private context returned an invalid response")
+            raise RuntimeError("Cognitive context returned an invalid response")
         texts.append(content)
     return texts
 
@@ -47,7 +42,7 @@ class BareMetalContextProvider(ContextProvider):
         self,
         *,
         endpoint: str | None,
-        load_context: Callable[..., Any] = private_context,
+        load_context: Callable[..., Any] = query_cognitive_store,
     ) -> None:
         super().__init__(source_id="elle-bare-metal-context")
         self.endpoint = endpoint
@@ -65,15 +60,33 @@ class BareMetalContextProvider(ContextProvider):
         user_id = get_request_context().user_id
         if not query or not user_id:
             raise RuntimeError("Bare-metal mode requires a user request and platform identity")
-        private_data = await asyncio.to_thread(
-            self.load_context,
-            endpoint=self.endpoint,
-            query=_bounded_query(query),
-            limit=5,
-            user_id=user_id,
-            dynamic_only=True,
+        private_results = await asyncio.gather(
+            asyncio.to_thread(
+                self.load_context,
+                endpoint=self.endpoint,
+                user_id=user_id,
+                store="data_lake",
+                mode="chronological",
+                query=None,
+                order="newest",
+                top=2,
+            ),
+            asyncio.to_thread(
+                self.load_context,
+                endpoint=self.endpoint,
+                user_id=user_id,
+                store="knowledge_base",
+                mode="auto",
+                query=_bounded_query(query),
+                order="newest",
+                top=12,
+            ),
         )
-        memory_texts = _memory_texts(private_data)
+        memory_texts = [
+            text
+            for private_data in private_results
+            for text in _memory_texts(private_data)
+        ]
         if not memory_texts:
             return
         serialized = json.dumps(

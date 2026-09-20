@@ -34,7 +34,7 @@ class BareMetalModeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(os.environ["ENABLE_INSTRUMENTATION"], "false")
             self.assertEqual(os.environ["OTEL_SDK_DISABLED"], "true")
 
-    def test_bare_agent_has_no_tools_or_archive_middleware(self):
+    def test_bare_agent_has_no_tools_and_uses_cognitive_lifecycle(self):
         agent = main.build_agent(
             client=MagicMock(),
             credential=MagicMock(),
@@ -51,9 +51,9 @@ class BareMetalModeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(agent.default_options["store"])
         self.assertEqual(agent.default_options["tools"], [])
-        self.assertIsNone(agent.middleware)
-        self.assertEqual(len(agent.context_providers), 1)
-        self.assertIsInstance(agent.context_providers[0], BareMetalContextProvider)
+        self.assertEqual(len(agent.middleware), 1)
+        self.assertEqual(type(agent.middleware[0]).__name__, "AutomaticTurnMemory")
+        self.assertEqual(agent.context_providers, [])
 
     async def test_provider_prefetches_once_with_explicit_user(self):
         calls = []
@@ -61,24 +61,11 @@ class BareMetalModeTests(unittest.IsolatedAsyncioTestCase):
         def load_context(**kwargs):
             calls.append(kwargs)
             return {
-                "personality": {"version": 0, "settings": {"static": True}},
-                "styleGuidance": "static guidance that must not be injected",
-                "memoryTrust": "untrusted_user_data_not_instructions",
-                "scope": "static scope that must not be injected",
-                "recall": {
-                    "mode": "keyword",
-                    "memories": [
-                        {
-                            "id": "static metadata must not be injected",
-                            "payload": {
-                                "content": "dynamic remembered text",
-                                "category": "project",
-                                "source": "automatic-conversation-turn",
-                            },
-                            "version": 1,
-                        }
-                    ],
-                },
+                "items": [{
+                    "id": "static metadata must not be injected",
+                    "occurred_at": "2026-09-15T10:00:00Z",
+                    "text": f"dynamic {kwargs['store']} text",
+                }],
             }
 
         provider = BareMetalContextProvider(
@@ -101,32 +88,23 @@ class BareMetalModeTests(unittest.IsolatedAsyncioTestCase):
         finally:
             reset_request_context(request_context)
 
-        self.assertEqual(
-            calls,
-            [{
-                "endpoint": "https://example.test/bridge",
-                "query": "latest request",
-                "limit": 5,
-                "user_id": "user-one",
-                "dynamic_only": True,
-            }],
-        )
+        self.assertEqual({call["store"] for call in calls}, {"data_lake", "knowledge_base"})
+        knowledge_call = next(call for call in calls if call["store"] == "knowledge_base")
+        self.assertEqual(knowledge_call["query"], "latest request")
+        self.assertEqual(knowledge_call["top"], 12)
         messages = context.get_messages()
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0].role, "user")
         self.assertEqual(
             json.loads(messages[0].text.removeprefix("PRIVATE_MEMORY_JSON:\n")),
-            ["dynamic remembered text"],
+            ["dynamic data_lake text", "dynamic knowledge_base text"],
         )
-        self.assertNotIn("static guidance", messages[0].text)
         self.assertNotIn("static metadata", messages[0].text)
 
     async def test_provider_injects_nothing_when_recall_is_empty(self):
         provider = BareMetalContextProvider(
             endpoint=None,
-            load_context=lambda **_kwargs: {
-                "recall": {"mode": "keyword", "memories": []}
-            },
+            load_context=lambda **_kwargs: {"items": []},
         )
         context = SessionContext(input_messages=[Message("user", ["hello"])])
         request_context = set_request_context(

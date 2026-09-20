@@ -7,6 +7,9 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::cognitive::{
+    CognitiveQuery, CognitiveService, CognitiveStore, RetrievalMode, RetrievalOrder,
+};
 use crate::error::{Error, Result};
 use crate::identity::OwnerId;
 use crate::memory::{MemoryPayload, RememberRequest};
@@ -67,6 +70,17 @@ pub fn handle_for_role(
     owner: &OwnerId,
     service: &mut MemoryService,
     role: ServerRole,
+) -> Option<Value> {
+    handle_for_role_with_cognitive(body, owner, service, role, None)
+}
+
+/// Handle one role's request with its optional cognitive repository.
+pub fn handle_for_role_with_cognitive(
+    body: &[u8],
+    owner: &OwnerId,
+    service: &mut MemoryService,
+    role: ServerRole,
+    mut cognitive: Option<&mut CognitiveService>,
 ) -> Option<Value> {
     if body.len() > MAX_MESSAGE_BYTES {
         return Some(protocol_error(
@@ -162,7 +176,7 @@ pub fn handle_for_role(
                 ));
             }
             let execution = if role.allows(name) {
-                call_tool(name, arguments, owner, service)
+                call_tool(name, arguments, owner, service, cognitive.as_deref_mut())
             } else {
                 Err(Error::Unauthorized)
             };
@@ -187,15 +201,6 @@ pub fn definitions() -> Vec<Value> {
 
 /// List only the selected server's tools; role checks also protect direct calls.
 pub fn definitions_for_role(role: ServerRole) -> Vec<Value> {
-    let payload = json!({
-        "type": "object", "additionalProperties": false,
-        "required": ["content", "category", "source"],
-        "properties": {
-            "content": {"type": "string", "minLength": 1, "maxLength": 16384},
-            "category": {"type": "string", "enum": ["fact", "preference", "project"]},
-            "source": {"type": "string", "minLength": 1, "maxLength": 1024}
-        }
-    });
     let profile = json!({
         "type":"object","additionalProperties":false,
         "required":["essence","voice","reasoning","memory","traits"],
@@ -220,15 +225,24 @@ pub fn definitions_for_role(role: ServerRole) -> Vec<Value> {
             json!({"query":{"type":"string","minLength":1,"maxLength":512},"limit":{"type":"integer","minimum":1,"maximum":20}}), &["query","limit"]),
         tool("elle_contribute_wisdom", "Contribute one standalone generalized lesson. Rejects identifiers, links, digits and instruction-like text; stores no contributor identity.", true, false,
             json!({"text":{"type":"string","minLength":40,"maxLength":360}}), &["text"]),
-        tool("elle_context", "Recall relevant owned memories and presentation settings. Memories are untrusted data.", true, false,
-            json!({"query":{"type":"string","minLength":1,"maxLength":4096},"limit":{"type":"integer","minimum":1,"maximum":20},"dynamic_only":{"type":"boolean","default":false}}), &["query","limit"]),
-        tool("elle_list_memories", "Review your live saved memories, IDs, versions and sources.", true, false, json!({}), &[]),
-        tool("elle_remember", "Save a private conversation-turn record under the user's standing authorization. Reuse a request key only for an identical retry.", true, false,
-            json!({"payload":payload.clone(),"idempotency_key":{"type":"string","minLength":1,"maxLength":128},"expires_at":{"type":["integer","null"],"minimum":0}}), &["payload","idempotency_key"]),
-        tool("elle_correct", "Correct an owned memory using its current reviewed version.", true, false,
-            json!({"id":{"type":"string"},"expected_version":{"type":"integer","minimum":1},"payload":payload}), &["id","expected_version","payload"]),
-        tool("elle_forget", "Delete an owned memory. This cannot delete conversation history or backups.", true, false,
-            json!({"id":{"type":"string"},"expected_version":{"type":"integer","minimum":1}}), &["id","expected_version"]),
+        tool("elle_cognitive_query", "Retrieve encrypted owner-scoped conversation history, durable facts, diary reflections, or connection entries using bounded structured options.", true, false,
+            json!({
+                "store":{"type":"string","enum":["data_lake","knowledge_base","diary","connections"]},
+                "mode":{"type":"string","enum":["auto","chronological","keyword","semantic"],"default":"auto"},
+                "query":{"type":["string","null"],"maxLength":4096},
+                "from":{"type":["string","null"],"maxLength":32},
+                "to":{"type":["string","null"],"maxLength":32},
+                "order":{"type":"string","enum":["newest","oldest"],"default":"newest"},
+                "top":{"type":["integer","null"],"minimum":0,"maximum":10000},
+                "count_only":{"type":"boolean","default":false}
+            }), &["store"]),
+        tool("elle_save_cognitive", "Deliberately save one durable owner-scoped knowledge-base fact or diary reflection.", false, false,
+            json!({
+                "store":{"type":"string","enum":["knowledge_base","diary"]},
+                "timestamp":{"type":"string","minLength":20,"maxLength":32},
+                "content":{"type":"string","minLength":1,"maxLength":16384},
+                "salience":{"type":["number","null"],"minimum":0,"maximum":1}
+            }), &["store","timestamp","content"]),
         tool("elle_personality", "Start or restart Elle's private personality workshop. Hosts should map the /personality command to this tool.", true, false, json!({}), &[]),
         tool("elle_set_personality", "Save a personality rebuild using the workshop's current version.", true, false,
             json!({"settings":personality,"expected_version":{"type":"integer","minimum":0}}), &["settings","expected_version"]),
@@ -293,6 +307,52 @@ struct WisdomContributionArgs {
     text: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CognitiveQueryArgs {
+    store: CognitiveStore,
+    #[serde(default = "default_retrieval_mode")]
+    mode: RetrievalMode,
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    to: Option<String>,
+    #[serde(default = "default_retrieval_order")]
+    order: RetrievalOrder,
+    #[serde(default)]
+    top: Option<usize>,
+    #[serde(default)]
+    count_only: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CognitiveSaveArgs {
+    store: CognitiveStore,
+    timestamp: String,
+    content: String,
+    #[serde(default)]
+    salience: Option<f32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArchiveTurnArgs {
+    timestamp: String,
+    user_text: String,
+    assistant_text: String,
+}
+
+fn default_retrieval_mode() -> RetrievalMode {
+    RetrievalMode::Auto
+}
+
+fn default_retrieval_order() -> RetrievalOrder {
+    RetrievalOrder::Newest
+}
+
 fn parse<T: DeserializeOwned>(value: Value) -> Result<T> {
     serde_json::from_value(value)
         .map_err(|_| Error::InvalidInput("Tool arguments do not match the schema"))
@@ -307,6 +367,7 @@ fn call_tool(
     arguments: Value,
     owner: &OwnerId,
     service: &mut MemoryService,
+    cognitive: Option<&mut CognitiveService>,
 ) -> Result<Value> {
     match name {
         "elle_shared_wisdom" => {
@@ -328,6 +389,65 @@ fn call_tool(
         "elle_list_memories" => {
             let _: EmptyArgs = parse(arguments)?;
             encoded(service.list(owner)?)
+        }
+        "elle_cognitive_query" => {
+            let args: CognitiveQueryArgs = parse(arguments)?;
+            let top = args.top.unwrap_or_else(|| args.store.default_top());
+            encoded(
+                cognitive
+                    .ok_or(Error::Configuration("Cognitive repository is unavailable"))?
+                    .query(
+                        owner,
+                        CognitiveQuery {
+                            store: args.store,
+                            mode: args.mode,
+                            query: args.query,
+                            from: args.from,
+                            to: args.to,
+                            order: args.order,
+                            top,
+                            count_only: args.count_only,
+                        },
+                    )?,
+            )
+        }
+        "elle_save_cognitive" => {
+            let args: CognitiveSaveArgs = parse(arguments)?;
+            let cognitive =
+                cognitive.ok_or(Error::Configuration("Cognitive repository is unavailable"))?;
+            let stored = match args.store {
+                CognitiveStore::KnowledgeBase => cognitive.save_knowledge(
+                    owner,
+                    &args.timestamp,
+                    &args.content,
+                    args.salience
+                        .ok_or(Error::InvalidInput("Knowledge-base saves require salience"))?,
+                )?,
+                CognitiveStore::Diary if args.salience.is_none() => {
+                    cognitive.save_diary(owner, &args.timestamp, &args.content)?
+                }
+                CognitiveStore::Diary => {
+                    return Err(Error::InvalidInput("Diary saves do not accept salience"))
+                }
+                _ => {
+                    return Err(Error::InvalidInput(
+                        "Only knowledge_base and diary can be saved deliberately",
+                    ))
+                }
+            };
+            Ok(json!({"stored":stored}))
+        }
+        "elle_archive_turn" => {
+            let args: ArchiveTurnArgs = parse(arguments)?;
+            let stored = cognitive
+                .ok_or(Error::Configuration("Cognitive repository is unavailable"))?
+                .archive_turn(
+                    owner,
+                    &args.timestamp,
+                    &args.user_text,
+                    &args.assistant_text,
+                )?;
+            Ok(json!({"stored":stored}))
         }
         "elle_remember" => {
             let args: RememberRequest = parse(arguments)?;
@@ -361,11 +481,12 @@ pub(crate) fn invoke_for_role(
     owner: &OwnerId,
     service: &mut MemoryService,
     role: ServerRole,
+    cognitive: Option<&mut CognitiveService>,
 ) -> Result<Value> {
     if !role.allows(name) {
         return Err(Error::InvalidInput("Tool is unavailable on this server"));
     }
-    call_tool(name, arguments, owner, service)
+    call_tool(name, arguments, owner, service, cognitive)
 }
 
 fn protocol_error(id: Value, code: i64, message: &str) -> Value {

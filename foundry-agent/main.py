@@ -15,7 +15,7 @@ from agent_framework.observability import disable_instrumentation
 from agent_framework_foundry_hosting import ResponsesHostServer
 from azure.identity import DefaultAzureCredential
 
-from bare_metal import BARE_METAL_INSTRUCTIONS, BareMetalContextProvider
+from bare_metal import BARE_METAL_INSTRUCTIONS
 from caller_identity import (
     elle_identity_status,
     validate_identity_binding_probe_nonce,
@@ -47,9 +47,10 @@ def build_agent(
             name=name,
             client=client,
             instructions=BARE_METAL_INSTRUCTIONS,
-            context_providers=[
-                BareMetalContextProvider(
-                    endpoint=os.environ.get("ELLE_PRIVATE_TOOLS_ENDPOINT")
+            middleware=[
+                AutomaticTurnMemory(
+                    endpoint=os.environ.get("ELLE_PRIVATE_TOOLS_ENDPOINT"),
+                    client=client,
                 )
             ],
             default_options={"store": False, "tools": []},
@@ -81,7 +82,8 @@ def build_agent(
         "default_options": {"store": False},
         "middleware": [
             AutomaticTurnMemory(
-                endpoint=os.environ.get("ELLE_PRIVATE_TOOLS_ENDPOINT")
+                endpoint=os.environ.get("ELLE_PRIVATE_TOOLS_ENDPOINT"),
+                client=client,
             )
         ],
     }
