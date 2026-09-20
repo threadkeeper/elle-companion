@@ -31,7 +31,7 @@ PROJECT_ENDPOINT = (
     "proj-default-sweden"
 )
 AGENT_NAME = "elle"
-DEFAULT_MODEL_DEPLOYMENT_NAME = "gpt-5.6-luna"
+DEFAULT_MODEL_DEPLOYMENT_NAME = "model-router"
 PRIVATE_TOOLS_ENDPOINT = (
     "https://elle-private-vnet.yellowsky-9d92d540.swedencentral."
     "azurecontainerapps.io/bridge"

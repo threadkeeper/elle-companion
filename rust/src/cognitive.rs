@@ -316,11 +316,10 @@ impl CognitiveService {
             return Err(Error::InvalidInput("Invalid connection ledger event"));
         }
         let id = format!("connection-{}", digest(event_key));
-        if let Some(record) = self.repository.get(
-            CognitiveStore::Connections,
-            owner.as_str(),
-            &id,
-        )? {
+        if let Some(record) =
+            self.repository
+                .get(CognitiveStore::Connections, owner.as_str(), &id)?
+        {
             let payload = self.decrypt_connection(&record)?;
             return Ok(ConnectionOutcome {
                 stored: false,
@@ -605,9 +604,7 @@ impl CognitiveService {
                     .map_err(|_| Error::Integrity("Invalid cognitive payload"))
             }
             CognitiveStore::Connections => serde_json::from_slice::<ConnectionPayload>(&plaintext)
-                .and_then(|payload| {
-                    serde_json::to_string(&payload).map(|text| (text, None, 1.0))
-                })
+                .and_then(|payload| serde_json::to_string(&payload).map(|text| (text, None, 1.0)))
                 .map_err(|_| Error::Integrity("Invalid cognitive payload")),
         }
     }
@@ -908,11 +905,14 @@ mod tests {
                 "Trust increased after a clear correction.",
             )
             .unwrap();
-        assert_eq!(first, ConnectionOutcome {
-            stored: true,
-            previous_balance: 0.0,
-            new_balance: 0.4,
-        });
+        assert_eq!(
+            first,
+            ConnectionOutcome {
+                stored: true,
+                previous_balance: 0.0,
+                new_balance: 0.4,
+            }
+        );
         let retry = service
             .save_connection(
                 &owner,
@@ -922,11 +922,14 @@ mod tests {
                 "Trust increased after a clear correction.",
             )
             .unwrap();
-        assert_eq!(retry, ConnectionOutcome {
-            stored: false,
-            previous_balance: 0.0,
-            new_balance: 0.4,
-        });
+        assert_eq!(
+            retry,
+            ConnectionOutcome {
+                stored: false,
+                previous_balance: 0.0,
+                new_balance: 0.4,
+            }
+        );
         let second = service
             .save_connection(
                 &owner,
@@ -943,7 +946,9 @@ mod tests {
             .query(&owner, chronological(CognitiveStore::Connections))
             .unwrap();
         assert_eq!(rows.count, 2);
-        assert!(rows.items[1].text.contains("\"new_balance\":0.30000000000000004"));
+        assert!(rows.items[1]
+            .text
+            .contains("\"new_balance\":0.30000000000000004"));
     }
 
     #[test]

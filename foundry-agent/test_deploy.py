@@ -58,7 +58,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(
             definition.environment_variables,
             {
-                "AZURE_AI_MODEL_DEPLOYMENT_NAME": "gpt-5.6-luna",
+                "AZURE_AI_MODEL_DEPLOYMENT_NAME": "model-router",
                 "ELLE_PRIVATE_TOOLS_ENDPOINT": deploy.PRIVATE_TOOLS_ENDPOINT,
                 "ELLE_PRIVATE_TOOLS_SCOPE": deploy.PRIVATE_TOOLS_SCOPE,
                 "ELLE_WISDOM_TOOLS_ENDPOINT": deploy.WISDOM_TOOLS_ENDPOINT,
@@ -82,7 +82,11 @@ class DeploymentTests(unittest.TestCase):
             "After every reply, the completed turn is appended",
             instructions,
         )
-        self.assertIn("checked for newly attained durable knowledge", instructions)
+        self.assertIn(
+            "checked for a meaningful diary reflection, relationship change",
+            instructions,
+        )
+        self.assertIn("and newly attained durable knowledge", instructions)
         self.assertIn("Use `elle_shared_wisdom`", instructions)
 
     def test_staging_honors_model_override(self):

@@ -103,7 +103,7 @@ def build_agent(
 
 
 async def main() -> None:
-    model = os.environ.get("AZURE_AI_MODEL_DEPLOYMENT_NAME", "gpt-5.6-luna")
+    model = os.environ.get("AZURE_AI_MODEL_DEPLOYMENT_NAME", "model-router")
     if BARE_METAL_MODE:
         disable_instrumentation()
     credential = DefaultAzureCredential(

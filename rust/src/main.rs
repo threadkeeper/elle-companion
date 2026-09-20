@@ -126,11 +126,13 @@ fn run() -> Result<()> {
             None => None,
         };
         let telemetry = if role == mcp::ServerRole::Private {
-            Some(TelemetryService::new(Box::new(CosmosTelemetryRepository::new(
-                cosmos,
-                &required("ELLE_COSMOS_DATABASE")?,
-                credential.clone(),
-            )?)))
+            Some(TelemetryService::new(Box::new(
+                CosmosTelemetryRepository::new(
+                    cosmos,
+                    &required("ELLE_COSMOS_DATABASE")?,
+                    credential.clone(),
+                )?,
+            )))
         } else {
             None
         };

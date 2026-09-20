@@ -267,7 +267,10 @@ fn mcp_preserves_identity_boundary_and_notifications_cannot_mutate() {
         assert_eq!(tool["inputSchema"]["additionalProperties"], false);
         assert_eq!(
             tool["annotations"]["readOnlyHint"],
-            tool["name"] != "elle_save_cognitive"
+            !matches!(
+                tool["name"].as_str(),
+                Some("elle_save_cognitive" | "elle_save_connection")
+            )
         );
         assert_eq!(tool["annotations"]["destructiveHint"], false);
     }

@@ -18,9 +18,7 @@ use crate::cognitive::{CognitiveRecord, CognitiveRepository, CognitiveStore};
 use crate::embeddings::Embedder;
 use crate::error::{Error, Result};
 use crate::repository::{MemoryRepository, StoredRecord};
-use crate::telemetry::{
-    TelemetryEvent, TelemetryRepository, TELEMETRY_CONTAINER, TELEMETRY_SCOPE,
-};
+use crate::telemetry::{TelemetryEvent, TelemetryRepository, TELEMETRY_CONTAINER, TELEMETRY_SCOPE};
 
 const MODEL_RESOURCE: &str = "https://cognitiveservices.azure.com/";
 const MAX_BODY: usize = 16 * 1024 * 1024;
@@ -680,17 +678,17 @@ impl CosmosTelemetryRepository {
             .duration_since(UNIX_EPOCH)
             .map_err(|_| Error::Configuration("System clock must be after Unix epoch"))?;
         let date = rfc1123(now.as_secs())?;
-        let path = format!(
-            "/dbs/{}/colls/{TELEMETRY_CONTAINER}/docs",
-            self.database
-        );
+        let path = format!("/dbs/{}/colls/{TELEMETRY_CONTAINER}/docs", self.database);
         Ok(self
             .agent
             .post(&format!("{}{}", self.endpoint, path))
             .set("Authorization", &authorization)
             .set("x-ms-version", "2018-12-31")
             .set("x-ms-date", &date)
-            .set("x-ms-documentdb-partitionkey", &partition_header(TELEMETRY_SCOPE)?)
+            .set(
+                "x-ms-documentdb-partitionkey",
+                &partition_header(TELEMETRY_SCOPE)?,
+            )
             .set("Content-Type", "application/json"))
     }
 }
@@ -703,7 +701,9 @@ impl TelemetryRepository for CosmosTelemetryRepository {
         let body = serde_json::to_vec(event)
             .map_err(|_| Error::InvalidInput("Could not encode telemetry document"))?;
         if body.len() > MAX_DOCUMENT {
-            return Err(Error::InvalidInput("Telemetry document exceeds Cosmos size limit"));
+            return Err(Error::InvalidInput(
+                "Telemetry document exceeds Cosmos size limit",
+            ));
         }
         let result = self.request()?.set("If-None-Match", "*").send_bytes(&body);
         match result {

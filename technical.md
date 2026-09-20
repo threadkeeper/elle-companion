@@ -94,9 +94,11 @@ Foundry agent version. It configures:
 - `AZURE_AI_MODEL_DEPLOYMENT_NAME`
 - `ELLE_PRIVATE_TOOLS_ENDPOINT`
 
-Promotion remains guarded by an expected live version. The default model is
-`gpt-5.6-luna`; `model-router` remains available through the environment
-override.
+Promotion remains guarded by an expected live version. The default deployment
+is `model-router`, currently backed by model-router version `2025-11-18` on the
+existing `foundry-jva-002` resource. The service records the requested
+deployment; comparisons remain same-router rather than verified same-model when
+the hosted Responses runtime does not expose the routed underlying model.
 
 ## Demo discipline
 
