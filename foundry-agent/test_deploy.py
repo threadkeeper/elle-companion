@@ -60,6 +60,7 @@ class DeploymentTests(unittest.TestCase):
             {
                 "AZURE_AI_MODEL_DEPLOYMENT_NAME": "gpt-5.6-luna",
                 "ELLE_PRIVATE_TOOLS_ENDPOINT": deploy.PRIVATE_TOOLS_ENDPOINT,
+                "ELLE_PRIVATE_TOOLS_SCOPE": deploy.PRIVATE_TOOLS_SCOPE,
                 "ELLE_WISDOM_TOOLS_ENDPOINT": deploy.WISDOM_TOOLS_ENDPOINT,
                 "ELLE_WISDOM_SCOPE": deploy.WISDOM_SCOPE,
             },

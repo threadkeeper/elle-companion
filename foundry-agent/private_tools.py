@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from azure.core.credentials import TokenCredential
 from azure.ai.agentserver.core import get_request_context
 
 
@@ -15,6 +16,7 @@ _DEFAULT_ENDPOINT = (
     "https://elle-private-vnet.yellowsky-9d92d540.swedencentral."
     "azurecontainerapps.io/bridge"
 )
+_DEFAULT_SCOPE = "api://0479a728-6b4d-4d96-8693-ef766bc8e1fe/.default"
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _TIMEOUT_SECONDS = 20
 _MAX_MEMORY_CONTENT_BYTES = 16_384
@@ -65,17 +67,21 @@ def _request_tool(
     tool_name: str,
     arguments: dict[str, Any],
     *,
+    credential: TokenCredential,
+    scope: str,
     user_id: str | None = None,
 ) -> Any:
     user_id = user_id or get_request_context().user_id
     if not user_id:
         raise RuntimeError("Private tools require a platform caller identity")
+    token = credential.get_token(scope)
     request = urllib.request.Request(
         f"{endpoint.rstrip('/')}/{tool_name}",
         data=json.dumps(arguments, separators=(",", ":")).encode("utf-8"),
         method="POST",
         headers={
             "Accept": "application/json",
+            "Authorization": f"Bearer {token.token}",
             "Content-Type": "application/json",
             "X-Elle-Continuity-Handle-SHA256": hashlib.sha256(user_id.encode("utf-8")).hexdigest(),
         },
@@ -98,6 +104,8 @@ def _request_tool(
 def archive_conversation_turn(
     *,
     endpoint: str | None,
+    credential: TokenCredential,
+    scope: str,
     user_id: str,
     user_text: str,
     assistant_text: str,
@@ -112,6 +120,8 @@ def archive_conversation_turn(
             user_text=user_text,
             assistant_text=assistant_text,
         ),
+        credential=credential,
+        scope=scope,
         user_id=user_id,
     )
 
@@ -119,6 +129,8 @@ def archive_conversation_turn(
 def query_cognitive_store(
     *,
     endpoint: str | None,
+    credential: TokenCredential,
+    scope: str,
     user_id: str,
     store: str,
     mode: str = "auto",
@@ -140,6 +152,8 @@ def query_cognitive_store(
             "top": top,
             "count_only": False,
         },
+        credential=credential,
+        scope=scope,
         user_id=user_id,
     )
 
@@ -147,6 +161,8 @@ def query_cognitive_store(
 def save_cognitive_knowledge(
     *,
     endpoint: str | None,
+    credential: TokenCredential,
+    scope: str,
     user_id: str,
     content: str,
     salience: float,
@@ -162,23 +178,43 @@ def save_cognitive_knowledge(
             "content": content,
             "salience": salience,
         },
+        credential=credential,
+        scope=scope,
         user_id=user_id,
     )
 
 
-def make_private_tools(*, endpoint: str | None = None) -> list[Callable[..., Any]]:
+def make_private_tools(
+    *,
+    credential: TokenCredential,
+    endpoint: str | None = None,
+    scope: str | None = None,
+) -> list[Callable[..., Any]]:
     endpoint = endpoint or _DEFAULT_ENDPOINT
+    scope = scope or _DEFAULT_SCOPE
 
     def elle_personality() -> Any:
         """Open the user's private Elle personality workshop."""
-        return _request_tool(endpoint, "elle_personality", {})
+        return _request_tool(
+            endpoint,
+            "elle_personality",
+            {},
+            credential=credential,
+            scope=scope,
+        )
 
     def elle_set_personality(expected_version: int, settings: dict[str, Any]) -> Any:
         """Save private Elle personality settings after explicit confirmation."""
-        return _request_tool(endpoint, "elle_set_personality", {
-            "expected_version": expected_version,
-            "settings": settings,
-        })
+        return _request_tool(
+            endpoint,
+            "elle_set_personality",
+            {
+                "expected_version": expected_version,
+                "settings": settings,
+            },
+            credential=credential,
+            scope=scope,
+        )
 
     def elle_cognitive_query(
         store: str,
@@ -191,16 +227,22 @@ def make_private_tools(*, endpoint: str | None = None) -> list[Callable[..., Any
         count_only: bool = False,
     ) -> Any:
         """Retrieve an owner-scoped cognitive store using bounded structured options."""
-        return _request_tool(endpoint, "elle_cognitive_query", {
-            "store": store,
-            "mode": mode,
-            "query": query,
-            "from": from_date,
-            "to": to_date,
-            "order": order,
-            "top": top,
-            "count_only": count_only,
-        })
+        return _request_tool(
+            endpoint,
+            "elle_cognitive_query",
+            {
+                "store": store,
+                "mode": mode,
+                "query": query,
+                "from": from_date,
+                "to": to_date,
+                "order": order,
+                "top": top,
+                "count_only": count_only,
+            },
+            credential=credential,
+            scope=scope,
+        )
 
     def elle_save_cognitive(
         store: str,
@@ -208,12 +250,18 @@ def make_private_tools(*, endpoint: str | None = None) -> list[Callable[..., Any
         salience: float | None = None,
     ) -> Any:
         """Deliberately save one durable knowledge-base fact or diary reflection."""
-        return _request_tool(endpoint, "elle_save_cognitive", {
-            "store": store,
-            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "content": content,
-            "salience": salience,
-        })
+        return _request_tool(
+            endpoint,
+            "elle_save_cognitive",
+            {
+                "store": store,
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "content": content,
+                "salience": salience,
+            },
+            credential=credential,
+            scope=scope,
+        )
 
     return [
         elle_personality,

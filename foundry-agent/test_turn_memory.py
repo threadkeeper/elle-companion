@@ -62,6 +62,8 @@ class AutomaticTurnMemoryTests(unittest.IsolatedAsyncioTestCase):
             captured,
             [{
                 "endpoint": "https://example.test/bridge",
+                "credential": None,
+                "scope": None,
                 "user_id": "demo-user",
                 "user_text": "latest user turn",
                 "assistant_text": "final Elle reply",
@@ -156,8 +158,39 @@ class AutomaticTurnMemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event[0] for event in events], ["archive", "assess", "knowledge"])
         self.assertEqual(events[2][1]["content"], "The user prefers concise answers.")
         self.assertEqual(events[2][1]["salience"], 0.8)
-        self.assertEqual(events[1][2]["tools"], [])
-        self.assertFalse(events[1][2]["store"])
+        self.assertEqual(events[1][2]["options"]["tools"], [])
+        self.assertFalse(events[1][2]["options"]["store"])
+        self.assertEqual(
+            events[1][2]["options"]["response_format"],
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "facts": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2048,
+                                },
+                                "salience": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                },
+                            },
+                            "required": ["content", "salience"],
+                        },
+                    }
+                },
+                "required": ["facts"],
+            },
+        )
 
     async def test_no_attained_knowledge_writes_only_the_daily_archive(self):
         events = []

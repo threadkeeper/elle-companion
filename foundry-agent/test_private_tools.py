@@ -1,6 +1,8 @@
 import hashlib
 import json
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 from azure.ai.agentserver.core import (
@@ -26,6 +28,11 @@ class Response:
 
 
 class PrivateToolsTests(unittest.TestCase):
+    def setUp(self):
+        self.credential = MagicMock()
+        self.credential.get_token.return_value = SimpleNamespace(token="workload-token")
+        self.scope = "api://elle/.default"
+
     def test_automatic_cognitive_helpers_use_explicit_user_binding(self):
         captured = []
 
@@ -36,6 +43,8 @@ class PrivateToolsTests(unittest.TestCase):
         with patch("private_tools.urllib.request.urlopen", side_effect=open_url):
             private_tools.query_cognitive_store(
                 endpoint="https://example.test/bridge",
+                credential=self.credential,
+                scope=self.scope,
                 user_id="explicit-user",
                 store="knowledge_base",
                 query="fast recall",
@@ -43,6 +52,8 @@ class PrivateToolsTests(unittest.TestCase):
             )
             private_tools.save_cognitive_knowledge(
                 endpoint="https://example.test/bridge",
+                credential=self.credential,
+                scope=self.scope,
                 user_id="explicit-user",
                 content="The user prefers concise answers.",
                 salience=0.8,
@@ -51,6 +62,10 @@ class PrivateToolsTests(unittest.TestCase):
 
         query_request, save_request = (item[0] for item in captured)
         expected_handle = hashlib.sha256(b"explicit-user").hexdigest()
+        self.assertEqual(
+            query_request.get_header("Authorization"),
+            "Bearer workload-token",
+        )
         self.assertEqual(
             query_request.get_header("X-elle-continuity-handle-sha256"),
             expected_handle,
@@ -70,7 +85,10 @@ class PrivateToolsTests(unittest.TestCase):
         })
 
     def test_private_tools_expose_only_new_cognitive_memory_schema(self):
-        names = [tool.__name__ for tool in private_tools.make_private_tools()]
+        names = [
+            tool.__name__
+            for tool in private_tools.make_private_tools(credential=self.credential)
+        ]
         self.assertEqual(names, [
             "elle_personality",
             "elle_set_personality",
@@ -84,7 +102,7 @@ class PrivateToolsTests(unittest.TestCase):
             self.assertNotIn(legacy, names)
 
     def test_current_user_binding_is_resolved_on_each_call(self):
-        tool = private_tools.make_private_tools()[2]
+        tool = private_tools.make_private_tools(credential=self.credential)[2]
         with patch("private_tools.urllib.request.urlopen", return_value=Response()) as open_url:
             for user_id in ("demo-one", "demo-two"):
                 token = set_request_context(FoundryAgentRequestContext(user_id=user_id))
@@ -102,6 +120,8 @@ class PrivateToolsTests(unittest.TestCase):
         with patch("private_tools.urllib.request.urlopen", return_value=Response()) as open_url:
             private_tools.archive_conversation_turn(
                 endpoint="https://example.test/bridge",
+                credential=self.credential,
+                scope=self.scope,
                 user_id="background-user",
                 user_text="hello",
                 assistant_text="reply",
@@ -123,7 +143,11 @@ class PrivateToolsTests(unittest.TestCase):
             captured.append((request.full_url, json.loads(request.data), timeout))
             return Response()
 
-        tools = private_tools.make_private_tools(endpoint="https://example.test/bridge")
+        tools = private_tools.make_private_tools(
+            credential=self.credential,
+            endpoint="https://example.test/bridge",
+            scope=self.scope,
+        )
         with patch("private_tools.urllib.request.urlopen", side_effect=open_url):
             token = set_request_context(FoundryAgentRequestContext(user_id="demo-user"))
             try:

@@ -52,12 +52,16 @@ class AutomaticTurnMemory(AgentMiddleware):
         self,
         *,
         endpoint: str | None,
+        credential: Any | None = None,
+        scope: str | None = None,
         client: Any | None = None,
         save_turn: Callable[..., Any] = archive_conversation_turn,
         load_context: Callable[..., Any] = query_cognitive_store,
         save_knowledge: Callable[..., Any] = save_cognitive_knowledge,
     ) -> None:
         self.endpoint = endpoint
+        self.credential = credential
+        self.scope = scope
         self.client = client
         self.save_turn = save_turn
         self.load_context = load_context
@@ -134,6 +138,8 @@ class AutomaticTurnMemory(AgentMiddleware):
                 asyncio.to_thread(
                     self.load_context,
                     endpoint=self.endpoint,
+                    credential=self.credential,
+                    scope=self.scope,
                     user_id=user_id,
                     **request,
                 )
@@ -178,6 +184,8 @@ class AutomaticTurnMemory(AgentMiddleware):
             await asyncio.to_thread(
                 self.save_turn,
                 endpoint=self.endpoint,
+                credential=self.credential,
+                scope=self.scope,
                 user_id=user_id,
                 user_text=user_text,
                 assistant_text=assistant_text,
@@ -196,9 +204,11 @@ class AutomaticTurnMemory(AgentMiddleware):
                         [f"User:\n{user_text}\n\nElle:\n{assistant_text}"],
                     ),
                 ],
-                response_format=_KNOWLEDGE_RESPONSE_FORMAT,
-                tools=[],
-                store=False,
+                options={
+                    "response_format": _KNOWLEDGE_RESPONSE_FORMAT,
+                    "tools": [],
+                    "store": False,
+                },
             )
             value = response.value
             facts = value.get("facts", []) if isinstance(value, dict) else []
@@ -221,6 +231,8 @@ class AutomaticTurnMemory(AgentMiddleware):
                 await asyncio.to_thread(
                     self.save_knowledge,
                     endpoint=self.endpoint,
+                    credential=self.credential,
+                    scope=self.scope,
                     user_id=user_id,
                     content=content.strip(),
                     salience=float(salience),

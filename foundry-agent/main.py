@@ -50,6 +50,8 @@ def build_agent(
             middleware=[
                 AutomaticTurnMemory(
                     endpoint=os.environ.get("ELLE_PRIVATE_TOOLS_ENDPOINT"),
+                    credential=credential,
+                    scope=os.environ.get("ELLE_PRIVATE_TOOLS_SCOPE"),
                     client=client,
                 )
             ],
@@ -64,7 +66,11 @@ def build_agent(
     )
     local_tools = [
         elle_identity_status,
-        *make_private_tools(endpoint=os.environ.get("ELLE_PRIVATE_TOOLS_ENDPOINT")),
+        *make_private_tools(
+            credential=credential,
+            endpoint=os.environ.get("ELLE_PRIVATE_TOOLS_ENDPOINT"),
+            scope=os.environ.get("ELLE_PRIVATE_TOOLS_SCOPE"),
+        ),
         *make_wisdom_tools(
             credential=credential,
             endpoint=os.environ.get("ELLE_WISDOM_TOOLS_ENDPOINT"),
@@ -83,6 +89,8 @@ def build_agent(
         "middleware": [
             AutomaticTurnMemory(
                 endpoint=os.environ.get("ELLE_PRIVATE_TOOLS_ENDPOINT"),
+                credential=credential,
+                scope=os.environ.get("ELLE_PRIVATE_TOOLS_SCOPE"),
                 client=client,
             )
         ],

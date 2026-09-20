@@ -41,6 +41,7 @@ WISDOM_TOOLS_ENDPOINT = (
     "azurecontainerapps.io/bridge"
 )
 WISDOM_SCOPE = "api://0479a728-6b4d-4d96-8693-ef766bc8e1fe/.default"
+PRIVATE_TOOLS_SCOPE = "api://0479a728-6b4d-4d96-8693-ef766bc8e1fe/.default"
 CONTINUITY_ENDPOINT = (
     "https://elle-private-vnet.yellowsky-9d92d540.swedencentral."
     "azurecontainerapps.io/continuity/context"
@@ -115,6 +116,7 @@ def deploy(
     environment_variables = {
         "AZURE_AI_MODEL_DEPLOYMENT_NAME": model_deployment_name(),
         "ELLE_PRIVATE_TOOLS_ENDPOINT": PRIVATE_TOOLS_ENDPOINT,
+        "ELLE_PRIVATE_TOOLS_SCOPE": PRIVATE_TOOLS_SCOPE,
         "ELLE_WISDOM_TOOLS_ENDPOINT": WISDOM_TOOLS_ENDPOINT,
         "ELLE_WISDOM_SCOPE": WISDOM_SCOPE,
     }
