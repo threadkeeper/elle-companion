@@ -1230,8 +1230,8 @@ mod tests {
                 continuity: None,
             };
             let challenge = header("WWW-Authenticate", "Bearer test").unwrap();
-            let policy = BridgePolicy::new(TENANT, WORKLOAD_ACTOR_OID, &[OWNER.to_owned()])
-                .unwrap();
+            let policy =
+                BridgePolicy::new(TENANT, WORKLOAD_ACTOR_OID, &[OWNER.to_owned()]).unwrap();
             handle_request(
                 request,
                 &RequestContext {
