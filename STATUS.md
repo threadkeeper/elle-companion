@@ -22,12 +22,14 @@ behaviour, not whether an agent genuinely experiences compassion or empathy.
 
 ## Live demo
 
-- Hosted agent: Elle v26 at 100% traffic.
-- Model: `gpt-5.6-luna`.
+- Hosted agent: Elle v27 at 100% traffic; v26 is the rollback version.
+- Model deployment: `model-router` version `2025-11-18` (`GlobalStandard`,
+	capacity 1000).
 - Private actions: direct HTTPS calls to the Rust bridge.
 - Storage: encrypted, user-partitioned Cosmos cognitive records in
 	`GaiaDataLake`, `GaiaKB`, `GaiaDiary` and `GaiaConnections`.
-- Private backend: revision 26, healthy on image `3e0d211`.
+- Private backend: revision 27, healthy on image
+	`60495c7ee3eeac167458b4e759fcb8ecc87326ef`.
 - Wisdom backend: revision 21, healthy on image `d74b019`.
 - Web demo: revision 6, healthy and pinned to Elle v22.
 
@@ -53,12 +55,22 @@ The Wisdom bridge requires the exact Elle service identity, its API client ID,
 and the `Continuity.Access` application role. A fresh v22 session retrieved the
 reviewed "small reversible steps" entry while the bridge logged HTTP 200.
 
-Elle v26 uses the Gaia-compatible cognitive schema for automatic retrieval,
-daily conversation archiving and durable-fact assessment. Production checks
-confirmed one owner/day DataLake record, exact retry deduplication, two unique
-KB facts, fresh-session recall of both facts and no cross-owner record matches.
-The provisioning manifest no longer creates `GaiaXPosts`, `GaiaXAuth`,
-`GaiaCardAssets` or `GaiaCardWallets`.
+Elle v26 introduced the Gaia-compatible cognitive schema for automatic
+retrieval, daily conversation archiving and durable-fact assessment.
+Production checks confirmed one owner/day DataLake record, exact retry
+deduplication, two unique KB facts, fresh-session recall of both facts and no
+cross-owner record matches. The provisioning manifest no longer creates
+`GaiaXPosts`, `GaiaXAuth`, `GaiaCardAssets` or `GaiaCardWallets`.
+
+Elle v27 automatically retrieves DataLake, Knowledge Base, Diary, Connections
+and Shared Wisdom before each response. After the response, it persists the
+DataLake archive first, then Diary and Connections, followed by Knowledge Base
+and deidentified Telemetry. Candidate checks confirmed fresh-session recall,
+Shared Wisdom retrieval, all four private-store reads and persistence through
+Knowledge Base. Telemetry write evidence remains unresolved and was explicitly
+accepted for this promotion. The live selector was verified at 100% v27, and
+the `model-router` deployment was verified healthy after promotion. This is a
+same-router result, not proof that Gaia and Elle used the same routed model.
 
 The authenticated web path measured 21.555 seconds browser end to end for a
 new-session save, including 10.350 seconds in Foundry; warm private recall took
