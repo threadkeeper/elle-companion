@@ -160,6 +160,12 @@ fn run() -> Result<()> {
                     &tenant, &audience, actor,
                 )?))
             }
+            (mcp::ServerRole::Private, Some(actor), Some(client)) => {
+                Some(elle::server::BridgeVerifier::Workload {
+                    verifier: WorkloadEntraVerifier::new(&tenant, &audience, actor, client)?,
+                    owner: OwnerId::new(&tenant, actor)?,
+                })
+            }
             (mcp::ServerRole::SharedWisdom, Some(actor), Some(client)) => {
                 Some(elle::server::BridgeVerifier::Workload {
                     verifier: WorkloadEntraVerifier::new(&tenant, &audience, actor, client)?,
@@ -170,7 +176,7 @@ fn run() -> Result<()> {
             (_, None, None) => None,
             _ => {
                 return Err(Error::Configuration(
-                    "Bridge actor and client configuration do not match the server role",
+                    "Bridge actor and client configuration are incomplete",
                 ))
             }
         };

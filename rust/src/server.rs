@@ -130,11 +130,11 @@ pub struct BridgePolicy {
 pub enum BridgeVerifier {
     /// A delegated actor asserting an allowed private-memory user.
     Delegated(EntraVerifier),
-    /// A pinned application workload accessing non-user Shared Wisdom.
+    /// A pinned application workload accessing Shared Wisdom or asserting an allowed user.
     Workload {
         /// Verifies the workload token's actor, client, role and token type.
         verifier: WorkloadEntraVerifier,
-        /// Configured dispatch owner; Shared Wisdom never persists this identity.
+        /// Authenticated workload owner; private dispatch requires a separate user assertion.
         owner: OwnerId,
     },
 }
@@ -639,6 +639,9 @@ fn authenticate_bridge(
                 verifier
                     .verify_diagnostic(token)
                     .map_err(|rejection| rejection.label())?;
+                if policy.is_some() {
+                    return Err("user_assertion_missing");
+                }
                 return Ok(owner.clone());
             }
             return verifier
@@ -650,6 +653,12 @@ fn authenticate_bridge(
         Some(BridgeVerifier::Delegated(verifier)) => verifier
             .verify_diagnostic(token)
             .map_err(|rejection| rejection.label())?,
+        Some(BridgeVerifier::Workload { verifier, owner }) => {
+            verifier
+                .verify_diagnostic(token)
+                .map_err(|rejection| rejection.label())?;
+            owner.clone()
+        }
         _ => return Err("bridge_verifier_missing"),
     };
     policy
@@ -1184,6 +1193,66 @@ mod tests {
         response
     }
 
+    fn raw_workload_private_response(request: &[u8]) -> String {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let address = server.server_addr().to_ip().unwrap();
+        let worker = std::thread::spawn(move || {
+            let request = server.recv().unwrap();
+            let verifier = EntraVerifier::new(TENANT, APP, OWNER).unwrap();
+            let workload_owner = OwnerId::new(TENANT, WORKLOAD_ACTOR_OID).unwrap();
+            let mut state = RuntimeState {
+                verifier,
+                bridge_verifier: Some(BridgeVerifier::Workload {
+                    verifier: WorkloadEntraVerifier::new(
+                        TENANT,
+                        APP,
+                        WORKLOAD_ACTOR_OID,
+                        WORKLOAD_CLIENT_ID,
+                    )
+                    .unwrap()
+                    .with_test_jwks(
+                        &serde_json::to_vec(&json!({"keys":[{
+                            "kid":TEST_RSA_KID,"kty":"RSA","alg":"RS256","use":"sig",
+                            "n":TEST_RSA_MODULUS,"e":"AQAB"
+                        }]}))
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                    owner: workload_owner,
+                }),
+                service: MemoryService::new(
+                    Box::new(EmptyRepository),
+                    FieldCipher::new([7; 32]),
+                    None,
+                ),
+                cognitive: None,
+                role: mcp::ServerRole::Private,
+                continuity: None,
+            };
+            let challenge = header("WWW-Authenticate", "Bearer test").unwrap();
+            let policy = BridgePolicy::new(TENANT, WORKLOAD_ACTOR_OID, &[OWNER.to_owned()])
+                .unwrap();
+            handle_request(
+                request,
+                &RequestContext {
+                    origin: "https://elle.example.com",
+                    metadata: "{}",
+                    challenge: &challenge,
+                    bridge_policy: Some(&policy),
+                },
+                &mut state,
+            )
+            .unwrap();
+        });
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream.write_all(request).unwrap();
+        stream.shutdown(Shutdown::Write).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        worker.join().unwrap();
+        response
+    }
+
     #[test]
     fn valid_chunked_json_body_is_decoded() {
         let request = b"POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n7\r\n{\"ok\":1\r\n1\r\n}\r\n0\r\n\r\n";
@@ -1615,6 +1684,33 @@ mod tests {
         );
         let response = raw_workload_wisdom_response(unauthorized.as_bytes());
         assert!(response.starts_with("HTTP/1.1 401 "), "{response}");
+    }
+
+    #[test]
+    fn direct_private_bridge_requires_allowlisted_workload_user_assertion() {
+        let token = signed_workload_token();
+        let allowed_body = json!({"user_object_id":OWNER}).to_string();
+        let allowed = format!(
+            "POST /bridge/elle_personality HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{allowed_body}",
+            allowed_body.len()
+        );
+        let response = raw_workload_private_response(allowed.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 200 "), "{response}");
+        assert!(!response.contains(&token));
+
+        for body in [
+            json!({}),
+            json!({"user_object_id":"33333333-3333-4333-8333-333333333333"}),
+        ] {
+            let body = body.to_string();
+            let request = format!(
+                "POST /bridge/elle_personality HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            let response = raw_workload_private_response(request.as_bytes());
+            assert!(response.starts_with("HTTP/1.1 401 "), "{response}");
+            assert!(!response.contains(&token));
+        }
     }
 
     #[test]

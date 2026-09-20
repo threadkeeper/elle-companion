@@ -75,6 +75,7 @@ def _request_tool(
     if not user_id:
         raise RuntimeError("Private tools require a platform caller identity")
     token = credential.get_token(scope)
+    arguments = {**arguments, "user_object_id": user_id}
     request = urllib.request.Request(
         f"{endpoint.rstrip('/')}/{tool_name}",
         data=json.dumps(arguments, separators=(",", ":")).encode("utf-8"),
@@ -83,7 +84,6 @@ def _request_tool(
             "Accept": "application/json",
             "Authorization": f"Bearer {token.token}",
             "Content-Type": "application/json",
-            "X-Elle-Continuity-Handle-SHA256": hashlib.sha256(user_id.encode("utf-8")).hexdigest(),
         },
     )
     try:
