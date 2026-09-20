@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import json
 import logging
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from agent_framework import AgentContext, AgentMiddleware, AgentResponse, Message
@@ -10,8 +12,12 @@ from azure.ai.agentserver.core import get_request_context
 from private_tools import (
     archive_conversation_turn,
     query_cognitive_store,
+    record_turn_telemetry,
+    save_cognitive_connection,
+    save_cognitive_diary,
     save_cognitive_knowledge,
 )
+from wisdom_tools import query_shared_wisdom
 
 
 logger = logging.getLogger(__name__)
@@ -32,17 +38,43 @@ _KNOWLEDGE_RESPONSE_FORMAT = {
                 },
                 "required": ["content", "salience"],
             },
-        }
+        },
+        "diary": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "properties": {
+                "content": {"type": "string", "minLength": 1, "maxLength": 4096},
+            },
+            "required": ["content"],
+        },
+        "connection": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "properties": {
+                "change_amount": {"type": "number", "minimum": -1, "maximum": 1},
+                "note": {"type": "string", "minLength": 1, "maxLength": 2048},
+            },
+            "required": ["change_amount", "note"],
+        },
     },
-    "required": ["facts"],
+    "required": ["facts", "diary", "connection"],
 }
 
-_KNOWLEDGE_INSTRUCTIONS = """Assess every completed turn for durable knowledge.
+_KNOWLEDGE_INSTRUCTIONS = """Assess every completed turn after it has been archived.
 Return only stable, standalone facts explicitly stated or confirmed by the user that
 could materially help in a future conversation. Exclude guesses, transient requests,
 raw dialogue, tool output, and facts derived only from Elle's reply. Return an empty
 facts array when nothing durable was learned. Assign each retained fact salience from
-0 to 1. Do not combine unrelated facts."""
+0 to 1. Do not combine unrelated facts.
+
+Set diary to a concise reflective observation only when the turn reveals a meaningful
+emotional pattern, personal development, important decision, or relationship insight
+worth revisiting. Diary is not a transcript or routine summary; otherwise return null.
+
+Set connection to a signed relationship delta only when this interaction meaningfully
+changed trust, warmth, mutual understanding, or strain. Use a small proportionate value
+from -1 to 1 and a standalone factual note explaining the shift. Routine pleasant turns
+are zero change and must return null."""
 
 
 class AutomaticTurnMemory(AgentMiddleware):
@@ -58,6 +90,12 @@ class AutomaticTurnMemory(AgentMiddleware):
         save_turn: Callable[..., Any] = archive_conversation_turn,
         load_context: Callable[..., Any] = query_cognitive_store,
         save_knowledge: Callable[..., Any] = save_cognitive_knowledge,
+        save_diary: Callable[..., Any] = save_cognitive_diary,
+        save_connection: Callable[..., Any] = save_cognitive_connection,
+        wisdom_endpoint: str | None = None,
+        wisdom_scope: str | None = None,
+        load_wisdom: Callable[..., Any] = query_shared_wisdom,
+        save_telemetry: Callable[..., Any] = record_turn_telemetry,
     ) -> None:
         self.endpoint = endpoint
         self.credential = credential
@@ -66,6 +104,12 @@ class AutomaticTurnMemory(AgentMiddleware):
         self.save_turn = save_turn
         self.load_context = load_context
         self.save_knowledge = save_knowledge
+        self.save_diary = save_diary
+        self.save_connection = save_connection
+        self.wisdom_endpoint = wisdom_endpoint
+        self.wisdom_scope = wisdom_scope
+        self.load_wisdom = load_wisdom
+        self.save_telemetry = save_telemetry
         self.pending: set[asyncio.Task[None]] = set()
 
     async def process(self, context: AgentContext, call_next) -> None:
@@ -132,6 +176,20 @@ class AutomaticTurnMemory(AgentMiddleware):
                 "order": "newest",
                 "top": 12,
             },
+            {
+                "store": "diary",
+                "mode": "auto",
+                "query": user_text,
+                "order": "newest",
+                "top": 12,
+            },
+            {
+                "store": "connections",
+                "mode": "chronological",
+                "query": None,
+                "order": "newest",
+                "top": 3,
+            },
         )
         results = await asyncio.gather(
             *(
@@ -158,6 +216,20 @@ class AutomaticTurnMemory(AgentMiddleware):
                 continue
             if isinstance(result, dict) and isinstance(result.get("items"), list):
                 context_data[request["store"]] = result["items"]
+        if self.credential is not None:
+            try:
+                wisdom = await asyncio.to_thread(
+                    self.load_wisdom,
+                    endpoint=self.wisdom_endpoint,
+                    credential=self.credential,
+                    scope=self.wisdom_scope,
+                    query=user_text,
+                    limit=5,
+                )
+                if isinstance(wisdom, dict):
+                    context_data["shared_wisdom"] = wisdom
+            except Exception:
+                logger.exception("Automatic Shared Wisdom retrieval failed")
         if not any(context_data.values()):
             return
         context.messages.insert(
@@ -180,6 +252,11 @@ class AutomaticTurnMemory(AgentMiddleware):
         assistant_text: str,
         response_id: str | None,
     ) -> None:
+        event_key = response_id or hashlib.sha256(
+            f"{user_text}\0{assistant_text}".encode("utf-8")
+        ).hexdigest()
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        persisted = True
         try:
             await asyncio.to_thread(
                 self.save_turn,
@@ -193,7 +270,14 @@ class AutomaticTurnMemory(AgentMiddleware):
             )
         except Exception:
             logger.exception("Automatic conversation-turn memory failed")
+            await self._record_telemetry(
+                user_id, event_key, timestamp, user_text, assistant_text, False
+            )
+            return
         if self.client is None:
+            await self._record_telemetry(
+                user_id, event_key, timestamp, user_text, assistant_text, True
+            )
             return
         try:
             response = await self.client.get_response(
@@ -214,7 +298,54 @@ class AutomaticTurnMemory(AgentMiddleware):
             facts = value.get("facts", []) if isinstance(value, dict) else []
         except Exception:
             logger.exception("Automatic knowledge assessment failed")
+            await self._record_telemetry(
+                user_id, event_key, timestamp, user_text, assistant_text, True
+            )
             return
+        diary = value.get("diary") if isinstance(value, dict) else None
+        if isinstance(diary, dict):
+            content = diary.get("content")
+            if isinstance(content, str) and content.strip():
+                try:
+                    await asyncio.to_thread(
+                        self.save_diary,
+                        endpoint=self.endpoint,
+                        credential=self.credential,
+                        scope=self.scope,
+                        user_id=user_id,
+                        content=content.strip(),
+                        timestamp=timestamp,
+                    )
+                except Exception:
+                    persisted = False
+                    logger.exception("Automatic cognitive diary save failed")
+        connection = value.get("connection") if isinstance(value, dict) else None
+        if isinstance(connection, dict):
+            change_amount = connection.get("change_amount")
+            note = connection.get("note")
+            if (
+                isinstance(change_amount, (int, float))
+                and not isinstance(change_amount, bool)
+                and -1 <= change_amount <= 1
+                and change_amount != 0
+                and isinstance(note, str)
+                and note.strip()
+            ):
+                try:
+                    await asyncio.to_thread(
+                        self.save_connection,
+                        endpoint=self.endpoint,
+                        credential=self.credential,
+                        scope=self.scope,
+                        user_id=user_id,
+                        event_key=event_key,
+                        change_amount=float(change_amount),
+                        note=note.strip(),
+                        timestamp=timestamp,
+                    )
+                except Exception:
+                    persisted = False
+                    logger.exception("Automatic cognitive connection save failed")
         for fact in facts:
             content = fact.get("content") if isinstance(fact, dict) else None
             salience = fact.get("salience") if isinstance(fact, dict) else None
@@ -238,4 +369,36 @@ class AutomaticTurnMemory(AgentMiddleware):
                     salience=float(salience),
                 )
             except Exception:
+                persisted = False
                 logger.exception("Automatic cognitive knowledge save failed")
+        await self._record_telemetry(
+            user_id, event_key, timestamp, user_text, assistant_text, persisted
+        )
+
+    async def _record_telemetry(
+        self,
+        user_id: str,
+        event_key: str,
+        timestamp: str,
+        user_text: str,
+        assistant_text: str,
+        persisted: bool,
+    ) -> None:
+        if self.credential is None and self.save_telemetry is record_turn_telemetry:
+            return
+        try:
+            await asyncio.to_thread(
+                self.save_telemetry,
+                endpoint=self.endpoint,
+                credential=self.credential,
+                scope=self.scope,
+                user_id=user_id,
+                response_id=event_key,
+                timestamp=timestamp,
+                input_chars=len(user_text),
+                reply_chars=len(assistant_text),
+                persisted=persisted,
+                completed=True,
+            )
+        except Exception:
+            logger.exception("Automatic app telemetry save failed")

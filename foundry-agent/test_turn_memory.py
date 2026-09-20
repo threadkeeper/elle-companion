@@ -122,7 +122,10 @@ class AutomaticTurnMemoryTests(unittest.IsolatedAsyncioTestCase):
         finally:
             reset_request_context(token)
 
-        self.assertEqual({call["store"] for call in calls}, {"data_lake", "knowledge_base"})
+        self.assertEqual(
+            {call["store"] for call in calls},
+            {"data_lake", "knowledge_base", "diary", "connections"},
+        )
         knowledge_call = next(call for call in calls if call["store"] == "knowledge_base")
         self.assertEqual(knowledge_call["query"], "What did I decide?")
 
@@ -137,7 +140,9 @@ class AutomaticTurnMemoryTests(unittest.IsolatedAsyncioTestCase):
                         "facts": [
                             {"content": "The user prefers concise answers.", "salience": 0.8},
                             {"content": "", "salience": 0.4},
-                        ]
+                        ],
+                        "diary": None,
+                        "connection": None,
                     }
                 )
 
@@ -160,37 +165,45 @@ class AutomaticTurnMemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[2][1]["salience"], 0.8)
         self.assertEqual(events[1][2]["options"]["tools"], [])
         self.assertFalse(events[1][2]["options"]["store"])
-        self.assertEqual(
-            events[1][2]["options"]["response_format"],
-            {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "facts": {
-                        "type": "array",
-                        "maxItems": 8,
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "content": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 2048,
-                                },
-                                "salience": {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1,
-                                },
-                            },
-                            "required": ["content", "salience"],
-                        },
-                    }
-                },
-                "required": ["facts"],
-            },
+        schema = events[1][2]["options"]["response_format"]
+        self.assertEqual(schema["required"], ["facts", "diary", "connection"])
+        self.assertEqual(schema["properties"]["connection"]["type"], ["object", "null"])
+
+    async def test_successful_archive_precedes_diary_connection_and_knowledge(self):
+        events = []
+
+        class Client:
+            async def get_response(self, _messages, **_kwargs):
+                events.append(("assess", {}))
+                return SimpleNamespace(value={
+                    "facts": [{"content": "A durable fact.", "salience": 0.7}],
+                    "diary": {"content": "A meaningful reflection."},
+                    "connection": {"change_amount": 0.2, "note": "Trust grew."},
+                })
+
+        middleware = AutomaticTurnMemory(
+            endpoint=None,
+            client=Client(),
+            save_turn=lambda **kwargs: events.append(("archive", kwargs)),
+            load_context=lambda **_kwargs: {"items": []},
+            save_diary=lambda **kwargs: events.append(("diary", kwargs)),
+            save_connection=lambda **kwargs: events.append(("connection", kwargs)),
+            save_knowledge=lambda **kwargs: events.append(("knowledge", kwargs)),
+            save_telemetry=lambda **kwargs: events.append(("telemetry", kwargs)),
         )
+        await middleware._save(
+            user_id="demo-user",
+            user_text="I trust this process more now.",
+            assistant_text="That matters.",
+            response_id="response-order",
+        )
+
+        self.assertEqual(
+            [event[0] for event in events],
+            ["archive", "assess", "diary", "connection", "knowledge", "telemetry"],
+        )
+        self.assertEqual(events[3][1]["event_key"], "response-order")
+        self.assertTrue(events[5][1]["persisted"])
 
     async def test_no_attained_knowledge_writes_only_the_daily_archive(self):
         events = []
@@ -198,7 +211,7 @@ class AutomaticTurnMemoryTests(unittest.IsolatedAsyncioTestCase):
         class Client:
             async def get_response(self, _messages, **_kwargs):
                 events.append("assess")
-                return SimpleNamespace(value={"facts": []})
+                return SimpleNamespace(value={"facts": [], "diary": None, "connection": None})
 
         middleware = AutomaticTurnMemory(
             endpoint=None,

@@ -195,6 +195,26 @@ struct FactPayload {
     embedding: Option<Vec<f32>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConnectionPayload {
+    change_amount: f64,
+    previous_balance: f64,
+    new_balance: f64,
+    note: String,
+}
+
+/// Result of an idempotent append to the relationship ledger.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConnectionOutcome {
+    /// Whether this call created a new ledger event.
+    pub stored: bool,
+    /// Running balance before the event.
+    pub previous_balance: f64,
+    /// Running balance after the event.
+    pub new_balance: f64,
+}
+
 /// Enforces cognitive write and retrieval policy above any storage backend.
 pub struct CognitiveService {
     repository: Box<dyn CognitiveRepository>,
@@ -275,6 +295,81 @@ impl CognitiveService {
     /// Deliberately append one reflection to its UTC-day diary document.
     pub fn save_diary(&mut self, owner: &OwnerId, timestamp: &str, text: &str) -> Result<bool> {
         self.append_daily(CognitiveStore::Diary, owner, timestamp, text)
+    }
+
+    /// Append one encrypted relationship delta, deduplicated by a host event key.
+    pub fn save_connection(
+        &mut self,
+        owner: &OwnerId,
+        timestamp: &str,
+        event_key: &str,
+        change_amount: f64,
+        note: &str,
+    ) -> Result<ConnectionOutcome> {
+        validate_timestamp(timestamp)?;
+        validate_text(note)?;
+        if event_key.trim().is_empty()
+            || event_key.len() > 512
+            || event_key.chars().any(char::is_control)
+            || !change_amount.is_finite()
+        {
+            return Err(Error::InvalidInput("Invalid connection ledger event"));
+        }
+        let id = format!("connection-{}", digest(event_key));
+        if let Some(record) = self.repository.get(
+            CognitiveStore::Connections,
+            owner.as_str(),
+            &id,
+        )? {
+            let payload = self.decrypt_connection(&record)?;
+            return Ok(ConnectionOutcome {
+                stored: false,
+                previous_balance: payload.previous_balance,
+                new_balance: payload.new_balance,
+            });
+        }
+        let mut latest: Option<(String, f64)> = None;
+        for record in self
+            .repository
+            .list(CognitiveStore::Connections, owner.as_str())?
+        {
+            validate_record(&record, CognitiveStore::Connections, owner.as_str())?;
+            let balance = self.decrypt_connection(&record)?.new_balance;
+            if latest
+                .as_ref()
+                .is_none_or(|(occurred_at, _)| record.occurred_at > *occurred_at)
+            {
+                latest = Some((record.occurred_at, balance));
+            }
+        }
+        let previous_balance = latest.map_or(0.0, |(_, balance)| balance);
+        let new_balance = previous_balance + change_amount;
+        if !new_balance.is_finite() {
+            return Err(Error::InvalidInput("Invalid connection ledger balance"));
+        }
+        let payload = serde_json::to_vec(&ConnectionPayload {
+            change_amount,
+            previous_balance,
+            new_balance,
+            note: note.trim().to_owned(),
+        })
+        .map_err(|_| Error::Integrity("Cannot encode cognitive payload"))?;
+        let stored = self.create_encrypted(
+            CognitiveRecord {
+                id,
+                owner_id: owner.as_str().to_owned(),
+                store: CognitiveStore::Connections,
+                occurred_at: timestamp.to_owned(),
+                ciphertext: String::new(),
+                version: 1,
+            },
+            &payload,
+        )?;
+        Ok(ConnectionOutcome {
+            stored,
+            previous_balance,
+            new_balance,
+        })
     }
 
     /// Query one fixed owner-scoped store with bounded options.
@@ -509,10 +604,20 @@ impl CognitiveService {
                     })
                     .map_err(|_| Error::Integrity("Invalid cognitive payload"))
             }
-            CognitiveStore::Connections => String::from_utf8(plaintext)
-                .map(|text| (text, None, 1.0))
+            CognitiveStore::Connections => serde_json::from_slice::<ConnectionPayload>(&plaintext)
+                .and_then(|payload| {
+                    serde_json::to_string(&payload).map(|text| (text, None, 1.0))
+                })
                 .map_err(|_| Error::Integrity("Invalid cognitive payload")),
         }
+    }
+
+    fn decrypt_connection(&self, record: &CognitiveRecord) -> Result<ConnectionPayload> {
+        let plaintext = self
+            .cipher
+            .decrypt(&record.owner_id, &record.id, &record.ciphertext)?;
+        serde_json::from_slice(&plaintext)
+            .map_err(|_| Error::Integrity("Invalid connection payload"))
     }
 
     fn embedding(&self, text: &str) -> Result<Option<Vec<f32>>> {
@@ -788,6 +893,57 @@ mod tests {
         assert!(diary.items[0]
             .text
             .contains("A useful reflection\n\na useful reflection"));
+    }
+
+    #[test]
+    fn connection_ledger_carries_balance_and_dedupes_host_event() {
+        let mut service = service();
+        let owner = owner("22222222-2222-2222-2222-222222222222");
+        let first = service
+            .save_connection(
+                &owner,
+                "2026-09-20T11:00:00Z",
+                "response-1",
+                0.4,
+                "Trust increased after a clear correction.",
+            )
+            .unwrap();
+        assert_eq!(first, ConnectionOutcome {
+            stored: true,
+            previous_balance: 0.0,
+            new_balance: 0.4,
+        });
+        let retry = service
+            .save_connection(
+                &owner,
+                "2026-09-20T11:00:01Z",
+                "response-1",
+                0.4,
+                "Trust increased after a clear correction.",
+            )
+            .unwrap();
+        assert_eq!(retry, ConnectionOutcome {
+            stored: false,
+            previous_balance: 0.0,
+            new_balance: 0.4,
+        });
+        let second = service
+            .save_connection(
+                &owner,
+                "2026-09-20T12:00:00Z",
+                "response-2",
+                -0.1,
+                "A small misunderstanding was repaired.",
+            )
+            .unwrap();
+        assert!(second.stored);
+        assert!((second.previous_balance - 0.4).abs() < f64::EPSILON);
+        assert!((second.new_balance - 0.3).abs() < f64::EPSILON);
+        let rows = service
+            .query(&owner, chronological(CognitiveStore::Connections))
+            .unwrap();
+        assert_eq!(rows.count, 2);
+        assert!(rows.items[1].text.contains("\"new_balance\":0.30000000000000004"));
     }
 
     #[test]

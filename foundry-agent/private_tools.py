@@ -204,6 +204,92 @@ def save_cognitive_knowledge(
     )
 
 
+def save_cognitive_diary(
+    *,
+    endpoint: str | None,
+    credential: TokenCredential,
+    scope: str,
+    user_id: str,
+    content: str,
+    timestamp: str | None = None,
+) -> Any:
+    """Persist one deliberate post-turn reflection through the new cognitive schema."""
+    return _request_tool(
+        endpoint or _DEFAULT_ENDPOINT,
+        "elle_save_cognitive",
+        {
+            "store": "diary",
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "content": content,
+            "salience": None,
+        },
+        credential=credential,
+        scope=scope,
+        user_id=user_id,
+    )
+
+
+def save_cognitive_connection(
+    *,
+    endpoint: str | None,
+    credential: TokenCredential,
+    scope: str,
+    user_id: str,
+    event_key: str,
+    change_amount: float,
+    note: str,
+    timestamp: str | None = None,
+) -> Any:
+    """Append one idempotent relationship-ledger event after a completed turn."""
+    return _request_tool(
+        endpoint or _DEFAULT_ENDPOINT,
+        "elle_save_connection",
+        {
+            "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "event_key": event_key,
+            "change_amount": change_amount,
+            "note": note,
+        },
+        credential=credential,
+        scope=scope,
+        user_id=user_id,
+    )
+
+
+def record_turn_telemetry(
+    *,
+    endpoint: str | None,
+    credential: TokenCredential,
+    scope: str,
+    user_id: str,
+    response_id: str,
+    timestamp: str,
+    input_chars: int,
+    reply_chars: int,
+    persisted: bool,
+    completed: bool = True,
+) -> Any:
+    """Record one deidentified hosted-turn outcome outside the model tool loop."""
+    return _request_tool(
+        endpoint or _DEFAULT_ENDPOINT,
+        "elle_record_telemetry",
+        {
+            "response_id": response_id,
+            "timestamp": timestamp,
+            "model": "foundry-agent",
+            "model_requests": 1,
+            "tools": [],
+            "input_chars": input_chars,
+            "reply_chars": reply_chars,
+            "persisted": persisted,
+            "completed": completed,
+        },
+        credential=credential,
+        scope=scope,
+        user_id=user_id,
+    )
+
+
 def make_private_tools(
     *,
     credential: TokenCredential,

@@ -53,6 +53,8 @@ def build_agent(
                     credential=credential,
                     scope=os.environ.get("ELLE_PRIVATE_TOOLS_SCOPE"),
                     client=client,
+                    wisdom_endpoint=os.environ.get("ELLE_WISDOM_TOOLS_ENDPOINT"),
+                    wisdom_scope=os.environ.get("ELLE_WISDOM_SCOPE"),
                 )
             ],
             default_options={"store": False, "tools": []},
@@ -92,6 +94,8 @@ def build_agent(
                 credential=credential,
                 scope=os.environ.get("ELLE_PRIVATE_TOOLS_SCOPE"),
                 client=client,
+                wisdom_endpoint=os.environ.get("ELLE_WISDOM_TOOLS_ENDPOINT"),
+                wisdom_scope=os.environ.get("ELLE_WISDOM_SCOPE"),
             )
         ],
     }

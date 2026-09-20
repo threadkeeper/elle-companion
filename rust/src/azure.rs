@@ -18,6 +18,9 @@ use crate::cognitive::{CognitiveRecord, CognitiveRepository, CognitiveStore};
 use crate::embeddings::Embedder;
 use crate::error::{Error, Result};
 use crate::repository::{MemoryRepository, StoredRecord};
+use crate::telemetry::{
+    TelemetryEvent, TelemetryRepository, TELEMETRY_CONTAINER, TELEMETRY_SCOPE,
+};
 
 const MODEL_RESOURCE: &str = "https://cognitiveservices.azure.com/";
 const MAX_BODY: usize = 16 * 1024 * 1024;
@@ -641,6 +644,75 @@ impl CognitiveRepository for CosmosCognitiveRepository {
         )?;
         checked_response(request.send_bytes(&body), &[200])?;
         Ok(())
+    }
+}
+
+/// Cosmos repository for deidentified app telemetry in its fixed `/scope` partition.
+pub struct CosmosTelemetryRepository {
+    endpoint: String,
+    token_resource: String,
+    database: String,
+    credential: Arc<dyn TokenProvider>,
+    agent: ureq::Agent,
+}
+
+impl CosmosTelemetryRepository {
+    /// Configure the existing Elle database and fixed telemetry container.
+    pub fn new(endpoint: &str, database: &str, credential: Arc<dyn TokenProvider>) -> Result<Self> {
+        let endpoint = azure_origin(endpoint, ".documents.azure.com")?;
+        if !safe_segment(database) {
+            return Err(Error::Configuration("Invalid Cosmos database identifier"));
+        }
+        Ok(Self {
+            token_resource: format!("{endpoint}/"),
+            endpoint,
+            database: database.to_owned(),
+            credential,
+            agent: http_agent(30),
+        })
+    }
+
+    fn request(&self) -> Result<ureq::Request> {
+        let token = Zeroizing::new(self.credential.token(&self.token_resource)?);
+        validate_token(&token)?;
+        let authorization = Zeroizing::new(aad_auth_header(&token));
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| Error::Configuration("System clock must be after Unix epoch"))?;
+        let date = rfc1123(now.as_secs())?;
+        let path = format!(
+            "/dbs/{}/colls/{TELEMETRY_CONTAINER}/docs",
+            self.database
+        );
+        Ok(self
+            .agent
+            .post(&format!("{}{}", self.endpoint, path))
+            .set("Authorization", &authorization)
+            .set("x-ms-version", "2018-12-31")
+            .set("x-ms-date", &date)
+            .set("x-ms-documentdb-partitionkey", &partition_header(TELEMETRY_SCOPE)?)
+            .set("Content-Type", "application/json"))
+    }
+}
+
+impl TelemetryRepository for CosmosTelemetryRepository {
+    fn create(&mut self, event: &TelemetryEvent) -> Result<bool> {
+        if event.scope != TELEMETRY_SCOPE || !safe_segment(&event.id) {
+            return Err(Error::InvalidInput("Invalid telemetry document"));
+        }
+        let body = serde_json::to_vec(event)
+            .map_err(|_| Error::InvalidInput("Could not encode telemetry document"))?;
+        if body.len() > MAX_DOCUMENT {
+            return Err(Error::InvalidInput("Telemetry document exceeds Cosmos size limit"));
+        }
+        let result = self.request()?.set("If-None-Match", "*").send_bytes(&body);
+        match result {
+            Err(ureq::Error::Status(409 | 412, _)) => Ok(false),
+            result => {
+                checked_response(result, &[201])?;
+                Ok(true)
+            }
+        }
     }
 }
 

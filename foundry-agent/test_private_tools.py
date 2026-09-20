@@ -60,8 +60,39 @@ class PrivateToolsTests(unittest.TestCase):
                 salience=0.8,
                 timestamp="2026-09-15T12:00:00Z",
             )
+            private_tools.save_cognitive_diary(
+                endpoint="https://example.test/bridge",
+                credential=self.credential,
+                scope=self.scope,
+                user_id="explicit-user",
+                content="A useful reflection.",
+                timestamp="2026-09-15T12:00:00Z",
+            )
+            private_tools.save_cognitive_connection(
+                endpoint="https://example.test/bridge",
+                credential=self.credential,
+                scope=self.scope,
+                user_id="explicit-user",
+                event_key="response-1",
+                change_amount=0.2,
+                note="Trust grew.",
+                timestamp="2026-09-15T12:00:00Z",
+            )
+            private_tools.record_turn_telemetry(
+                endpoint="https://example.test/bridge",
+                credential=self.credential,
+                scope=self.scope,
+                user_id="explicit-user",
+                response_id="response-1",
+                timestamp="2026-09-15T12:00:00Z",
+                input_chars=12,
+                reply_chars=24,
+                persisted=True,
+            )
 
-        query_request, save_request = (item[0] for item in captured)
+        query_request, save_request, diary_request, connection_request, telemetry_request = (
+            item[0] for item in captured
+        )
         self.assertEqual(
             query_request.get_header("Authorization"),
             "Bearer workload-token",
@@ -84,6 +115,21 @@ class PrivateToolsTests(unittest.TestCase):
             "salience": 0.8,
             "user_object_id": "explicit-user",
         })
+        self.assertEqual(diary_request.full_url, "https://example.test/bridge/elle_save_cognitive")
+        self.assertEqual(json.loads(diary_request.data)["store"], "diary")
+        self.assertEqual(
+            connection_request.full_url,
+            "https://example.test/bridge/elle_save_connection",
+        )
+        self.assertEqual(json.loads(connection_request.data)["event_key"], "response-1")
+        self.assertEqual(
+            telemetry_request.full_url,
+            "https://example.test/bridge/elle_record_telemetry",
+        )
+        telemetry = json.loads(telemetry_request.data)
+        self.assertEqual(telemetry["user_object_id"], "explicit-user")
+        self.assertEqual(telemetry["input_chars"], 12)
+        self.assertTrue(telemetry["persisted"])
 
     def test_token_diagnostic_exposes_claim_ids_but_not_token_material(self):
         claims = {

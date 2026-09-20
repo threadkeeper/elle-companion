@@ -50,6 +50,24 @@ def _request_tool(
     return json.loads(body)
 
 
+def query_shared_wisdom(
+    *,
+    endpoint: str | None,
+    credential: TokenCredential,
+    scope: str | None,
+    query: str,
+    limit: int = 5,
+) -> Any:
+    """Retrieve reviewed shared lessons for automatic pre-turn context."""
+    return _request_tool(
+        endpoint=endpoint or _DEFAULT_ENDPOINT,
+        scope=scope or _DEFAULT_SCOPE,
+        credential=credential,
+        tool_name="elle_shared_wisdom",
+        arguments={"query": query, "limit": limit},
+    )
+
+
 def make_wisdom_tools(
     *,
     credential: TokenCredential,

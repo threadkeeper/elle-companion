@@ -243,6 +243,13 @@ pub fn definitions_for_role(role: ServerRole) -> Vec<Value> {
                 "content":{"type":"string","minLength":1,"maxLength":16384},
                 "salience":{"type":["number","null"],"minimum":0,"maximum":1}
             }), &["store","timestamp","content"]),
+        tool("elle_save_connection", "Append one deliberate owner-scoped relationship delta after a completed turn.", false, false,
+            json!({
+                "timestamp":{"type":"string","minLength":20,"maxLength":32},
+                "event_key":{"type":"string","minLength":1,"maxLength":512},
+                "change_amount":{"type":"number","minimum":-1,"maximum":1},
+                "note":{"type":"string","minLength":1,"maxLength":16384}
+            }), &["timestamp","event_key","change_amount","note"]),
         tool("elle_personality", "Start or restart Elle's private personality workshop. Hosts should map the /personality command to this tool.", true, false, json!({}), &[]),
         tool("elle_set_personality", "Save a personality rebuild using the workshop's current version.", true, false,
             json!({"settings":personality,"expected_version":{"type":"integer","minimum":0}}), &["settings","expected_version"]),
@@ -335,6 +342,15 @@ struct CognitiveSaveArgs {
     content: String,
     #[serde(default)]
     salience: Option<f32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConnectionSaveArgs {
+    timestamp: String,
+    event_key: String,
+    change_amount: f64,
+    note: String,
 }
 
 #[derive(Deserialize)]
@@ -436,6 +452,25 @@ fn call_tool(
                 }
             };
             Ok(json!({"stored":stored}))
+        }
+        "elle_save_connection" => {
+            let args: ConnectionSaveArgs = parse(arguments)?;
+            if !(-1.0..=1.0).contains(&args.change_amount) {
+                return Err(Error::InvalidInput(
+                    "Connection change amount must be from -1 to 1",
+                ));
+            }
+            encoded(
+                cognitive
+                    .ok_or(Error::Configuration("Cognitive repository is unavailable"))?
+                    .save_connection(
+                        owner,
+                        &args.timestamp,
+                        &args.event_key,
+                        args.change_amount,
+                        &args.note,
+                    )?,
+            )
         }
         "elle_archive_turn" => {
             let args: ArchiveTurnArgs = parse(arguments)?;

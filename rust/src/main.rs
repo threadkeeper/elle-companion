@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use elle::auth::{EntraVerifier, WorkloadEntraVerifier};
 use elle::azure::{
-    CosmosCognitiveRepository, CosmosRepository, FoundryClient, ManagedIdentityCredential,
+    CosmosCognitiveRepository, CosmosRepository, CosmosTelemetryRepository, FoundryClient,
+    ManagedIdentityCredential,
 };
 use elle::cognitive::CognitiveService;
 use elle::encryption::FieldCipher;
@@ -19,6 +20,7 @@ use elle::identity::OwnerId;
 use elle::mcp::{self, MAX_MESSAGE_BYTES};
 use elle::memory::{MemoryPayload, RememberRequest};
 use elle::service::MemoryService;
+use elle::telemetry::TelemetryService;
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
@@ -123,6 +125,15 @@ fn run() -> Result<()> {
             ),
             None => None,
         };
+        let telemetry = if role == mcp::ServerRole::Private {
+            Some(TelemetryService::new(Box::new(CosmosTelemetryRepository::new(
+                cosmos,
+                &required("ELLE_COSMOS_DATABASE")?,
+                credential.clone(),
+            )?)))
+        } else {
+            None
+        };
         let mut service = MemoryService::new(
             Box::new(repository),
             FieldCipher::from_base64(&key)?,
@@ -195,7 +206,13 @@ fn run() -> Result<()> {
             verifier,
             service,
             role,
-            elle::server::RuntimeConfig::new(bridge_verifier, bridge_policy, continuity, cognitive),
+            elle::server::RuntimeConfig::new(
+                bridge_verifier,
+                bridge_policy,
+                continuity,
+                cognitive,
+                telemetry,
+            ),
         );
     }
 

@@ -21,6 +21,7 @@ use crate::error::{Error, Result};
 use crate::identity::OwnerId;
 use crate::mcp;
 use crate::service::MemoryService;
+use crate::telemetry::{TelemetryRequest, TelemetryService};
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const MAX_CONTINUITY_BINDINGS_BYTES: u64 = 1024 * 1024;
@@ -188,6 +189,7 @@ struct RuntimeState {
     bridge_verifier: Option<BridgeVerifier>,
     service: MemoryService,
     cognitive: Option<CognitiveService>,
+    telemetry: Option<TelemetryService>,
     role: mcp::ServerRole,
     continuity: Option<ContinuityConfig>,
 }
@@ -198,6 +200,7 @@ pub struct RuntimeConfig {
     bridge_policy: Option<BridgePolicy>,
     continuity: Option<ContinuityConfig>,
     cognitive: Option<CognitiveService>,
+    telemetry: Option<TelemetryService>,
 }
 
 impl RuntimeConfig {
@@ -207,12 +210,14 @@ impl RuntimeConfig {
         bridge_policy: Option<BridgePolicy>,
         continuity: Option<ContinuityConfig>,
         cognitive: Option<CognitiveService>,
+        telemetry: Option<TelemetryService>,
     ) -> Self {
         Self {
             bridge_verifier,
             bridge_policy,
             continuity,
             cognitive,
+            telemetry,
         }
     }
 }
@@ -247,6 +252,7 @@ pub fn serve(
         bridge_verifier: runtime.bridge_verifier,
         service,
         cognitive: runtime.cognitive,
+        telemetry: runtime.telemetry,
         role,
         continuity: runtime.continuity,
     };
@@ -587,6 +593,29 @@ fn handle_bridge(
         }
     };
     let arguments = Value::Object(arguments);
+    if tool_name == "elle_record_telemetry" {
+        let result = if state.role != mcp::ServerRole::Private {
+            Err(Error::Unauthorized)
+        } else {
+            let request: TelemetryRequest = serde_json::from_value(arguments)
+                .map_err(|_| Error::InvalidInput("Tool arguments do not match the schema"))?;
+            state
+                .telemetry
+                .as_mut()
+                .ok_or(Error::Configuration("Telemetry repository is unavailable"))?
+                .record(request)
+                .map(|stored| json!({"stored":stored}))
+        };
+        return match result {
+            Ok(value) => reply(request, 200, &value.to_string(), None),
+            Err(error) => reply(
+                request,
+                400,
+                &json!({"error":error.to_string()}).to_string(),
+                None,
+            ),
+        };
+    }
     match mcp::invoke_for_role(
         tool_name,
         arguments,
@@ -1093,6 +1122,7 @@ mod tests {
                 bridge_verifier: None,
                 service: MemoryService::new(Box::new(repository), FieldCipher::new([7; 32]), None),
                 cognitive: None,
+                telemetry: None,
                 role,
                 continuity,
             };
@@ -1168,6 +1198,7 @@ mod tests {
                     None,
                 ),
                 cognitive: None,
+                telemetry: None,
                 role: mcp::ServerRole::SharedWisdom,
                 continuity: None,
             };
@@ -1226,6 +1257,7 @@ mod tests {
                     None,
                 ),
                 cognitive: None,
+                telemetry: None,
                 role: mcp::ServerRole::Private,
                 continuity: None,
             };

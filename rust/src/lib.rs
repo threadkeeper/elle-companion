@@ -17,4 +17,5 @@ pub mod personality;
 pub mod repository;
 pub mod server;
 pub mod service;
+pub mod telemetry;
 pub mod wisdom;
