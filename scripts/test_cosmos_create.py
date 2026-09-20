@@ -22,8 +22,7 @@ class CosmosCreatePolicyTests(unittest.TestCase):
         names = {container["name"] for container in policy["containers"]}
         self.assertEqual(names, {
             "GaiaKB", "GaiaDataLake", "GaiaDiary", "GaiaWebSearchHistory",
-            "GaiaConnections", "DataLakeIndex", "GaiaCardWallets",
-            "GaiaTelemetry", "GaiaCardAssets", "GaiaXAuth", "GaiaXPosts",
+            "GaiaConnections", "DataLakeIndex", "GaiaTelemetry",
             "WisdomConsents", "UserPreferences",
         })
         self.assertTrue(names.isdisjoint(policy["protected_existing_containers"]))
@@ -32,8 +31,8 @@ class CosmosCreatePolicyTests(unittest.TestCase):
         specs = {spec.name: spec for spec in cosmos_create.CONTAINERS}
         for name in (
             "GaiaKB", "GaiaDataLake", "GaiaDiary", "GaiaWebSearchHistory",
-            "GaiaConnections", "DataLakeIndex", "GaiaCardWallets",
-            "WisdomConsents", "UserPreferences",
+            "GaiaConnections", "DataLakeIndex", "WisdomConsents",
+            "UserPreferences",
         ):
             self.assertEqual(specs[name].partition_key, "/owner_id")
         self.assertEqual(specs["GaiaKB"].unique_paths, ())

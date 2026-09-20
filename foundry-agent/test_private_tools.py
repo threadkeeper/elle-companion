@@ -1,4 +1,5 @@
 import hashlib
+import base64
 import json
 import unittest
 from types import SimpleNamespace
@@ -82,6 +83,25 @@ class PrivateToolsTests(unittest.TestCase):
             "content": "The user prefers concise answers.",
             "salience": 0.8,
             "user_object_id": "explicit-user",
+        })
+
+    def test_token_diagnostic_exposes_claim_ids_but_not_token_material(self):
+        claims = {
+            "oid": "actor-id",
+            "azp": "client-id",
+            "idtyp": "app",
+            "roles": ["Continuity.Access"],
+            "secret": "must-not-be-logged",
+        }
+        payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+
+        diagnostic = private_tools._token_diagnostic(f"header.{payload}.signature")
+
+        self.assertEqual(diagnostic, {
+            "oid": "actor-id",
+            "azp": "client-id",
+            "idtyp": "app",
+            "roles": ["Continuity.Access"],
         })
 
     def test_private_tools_expose_only_new_cognitive_memory_schema(self):

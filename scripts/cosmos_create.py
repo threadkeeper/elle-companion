@@ -35,11 +35,7 @@ CONTAINERS = (
     ContainerSpec("GaiaWebSearchHistory", "/owner_id", ("/occurred_at",)),
     ContainerSpec("GaiaConnections", "/owner_id", ("/occurred_at",)),
     ContainerSpec("DataLakeIndex", "/owner_id", ("/occurred_at",)),
-    ContainerSpec("GaiaCardWallets", "/owner_id", order_field="acquiredAt"),
     ContainerSpec("GaiaTelemetry", "/scope", order_field="timestamp"),
-    ContainerSpec("GaiaCardAssets", "/seasonId", order_field="assetId"),
-    ContainerSpec("GaiaXAuth", "/scope", order_field="rotatedAt"),
-    ContainerSpec("GaiaXPosts", "/scope", order_field="postedAt"),
     ContainerSpec("WisdomConsents", "/owner_id", order_field="updated_at"),
     ContainerSpec("UserPreferences", "/owner_id", order_field="updated_at"),
 )

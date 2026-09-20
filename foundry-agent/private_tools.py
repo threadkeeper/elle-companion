@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import logging
@@ -20,6 +21,20 @@ _DEFAULT_SCOPE = "api://0479a728-6b4d-4d96-8693-ef766bc8e1fe/.default"
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _TIMEOUT_SECONDS = 20
 _MAX_MEMORY_CONTENT_BYTES = 16_384
+
+
+def _token_diagnostic(token: str) -> dict[str, Any]:
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+    except (IndexError, ValueError, json.JSONDecodeError):
+        return {"claims": "unavailable"}
+    return {
+        name: claims[name]
+        for name in ("oid", "azp", "appid", "idtyp", "roles")
+        if name in claims
+    }
 
 
 def _bounded_text(value: str, maximum_bytes: int) -> str:
@@ -93,6 +108,11 @@ def _request_tool(
             body = response.read(_MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as error:
         detail = error.read(512).decode("utf-8", errors="replace")
+        if error.code == 401:
+            logger.error(
+                "Private tool workload identity rejected: %s",
+                _token_diagnostic(token.token),
+            )
         raise RuntimeError(f"Private tool returned HTTP {error.code}: {detail}") from error
     except urllib.error.URLError as error:
         raise RuntimeError("Private tool request failed") from error
