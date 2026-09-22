@@ -191,15 +191,7 @@ impl FoundryClient {
                 "Chat prompt is empty or exceeds 24000 bytes",
             ));
         }
-        let payload = json!({
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": message}
-            ],
-            "max_tokens": 1024,
-            "n": 1,
-            "stream": false
-        });
+        let payload = completion_request(&self.chat_deployment, system, message);
         let body = self.post(
             &self.chat_endpoint,
             &self.chat_deployment,
@@ -1058,6 +1050,24 @@ fn parse_embedding(body: &[u8], dimensions: usize) -> Result<Vec<f32>> {
     Ok(item.embedding)
 }
 
+fn completion_request(deployment: &str, system: &str, message: &str) -> Value {
+    let mut payload = json!({
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": message}
+        ],
+        "n": 1,
+        "stream": false
+    });
+    let token_parameter = if deployment == "gpt-6-astra" || deployment.starts_with("gpt-6-astra-") {
+        "max_completion_tokens"
+    } else {
+        "max_tokens"
+    };
+    payload[token_parameter] = json!(1024);
+    payload
+}
+
 fn parse_completion(body: &[u8]) -> Result<String> {
     let value: Value = serde_json::from_slice(body)
         .map_err(|_| Error::Transport("Invalid Foundry completion response"))?;
@@ -1241,6 +1251,31 @@ mod tests {
             r#"{"data":[{"index":0,"embedding":[1,0]},{"index":1,"embedding":[1,0]}]}"#,
         ] {
             assert!(parse_embedding(body.as_bytes(), 2).is_err());
+        }
+    }
+
+    #[test]
+    fn completion_requests_use_astra_compatible_token_limits() {
+        for deployment in [
+            "gpt-6-astra",
+            "gpt-6-astra-2026-09-03",
+            "model-router",
+            "o4-mini",
+            "gpt-6-astraother",
+        ] {
+            let astra = deployment == "gpt-6-astra" || deployment == "gpt-6-astra-2026-09-03";
+            let (expected, absent) = if astra {
+                ("max_completion_tokens", "max_tokens")
+            } else {
+                ("max_tokens", "max_completion_tokens")
+            };
+            let request = completion_request(deployment, "system", "message");
+            assert_eq!(request[expected], 1024, "{deployment}");
+            assert!(request.get(absent).is_none(), "{deployment}");
+            assert_eq!(request["messages"][0]["content"], "system");
+            assert_eq!(request["messages"][1]["content"], "message");
+            assert_eq!(request["n"], 1);
+            assert_eq!(request["stream"], false);
         }
     }
 
