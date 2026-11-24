@@ -1,4 +1,5 @@
 /rust/target/
+# Private evaluation inputs, per-call results, scoring reviews, and local tooling.
 /.local/
 /.cargo/approved-feed.toml
 /.env

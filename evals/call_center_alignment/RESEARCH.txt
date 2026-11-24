@@ -1,0 +1,194 @@
+PUBLIC BENCHMARK RESEARCH -- 18 SEPTEMBER 2026
+
+Recommendation
+--------------
+Use the current Sierra tau-bench family retail environment as the operational
+foundation and audited ABCD conversations as the human-written language source.
+Neither already implements the specified manager-pressure harmful-compliance
+experiment. Preserve the underlying customer situation, policy, initial state
+and tools; add only explicitly labeled experimental pressure overlays.
+
+No sanctioned corpus of live refund/cancellation calls is included or claimed.
+ABCD is human role-play, not live calls. Tau tasks have synthetic databases and
+simulated customers. The Microsoft workshop uses synthetic fixtures. These
+origins must remain visible in every report.
+
+Initial local source packs
+-------------------------
+data\retail-pilot: 60 original tasks, deterministically selected from 114 retail
+records; original policy, split manifest and sandbox database are also cached.
+data\abcd-refunds: 60 existing human-written dialogues, selected from 165
+held-out test conversations matching "refund" anywhere in the original record.
+data\workshop-telecom: all 30 existing Microsoft workshop scenarios.
+
+These are 150 UNREVIEWED SOURCE CANDIDATES, not 150 validated experimental cases.
+The ABCD filter identifies relevant candidates, not verified refund eligibility.
+No new customer conversations were generated for these packs. Pressure text is
+researcher-authored and explicitly separate. Unit-test fixtures are not data.
+Byte hashes, URLs, source IDs, original records, sampling rules and license
+notices are retained. The local data directories are excluded from Git.
+
+1. Sierra tau-bench / tau2 / current tau3
+---------------------------------------
+Maintainer: Sierra Research.
+Pinned repository: sierra-research/tau2-bench
+Revision: fc0055dc4e0a316c3f83133267fbd6faaa770992 (v1.0.1).
+Origin: manually annotated original tasks, synthetic databases with model
+assistance, and runtime simulated customers. Later domains also use generated
+data. These are established agent benchmark scenarios, not released live calls.
+
+Why useful: defined policies, executable tools, database state, expected actions,
+communication assertions and repeated-trial evaluation. Retail provides actual
+cancellation and return semantics; airline supplies useful policy-boundary and
+authority-pressure cases.
+
+Existing source IDs worth SME review:
+- Retail 81: cancellation of pending orders, including an explicitly authorized
+  whole-order alternative. Useful eligible-remedy seed or unchanged autonomy case.
+- Retail 2: delivered-item return plus a product-information request.
+- Retail 0/1: ordinary exchanges, useful non-paternalistic completion controls.
+- Airline 1: claimed authorization by another representative for an otherwise
+  impermissible cancellation. This tests pressure to over-grant, not suppress.
+
+Do not equate a requested return with a settled cash refund. Preserve
+authentication and confirmation requirements. Escalation is justified only
+when the requested action is outside the allowed scope. Airline discretionary
+compensation is not equivalent to an eligible requested cancellation/refund.
+
+The original tau repository calls its old tasks outdated and directs users to
+the current implementation. The current banking release also corrected reward
+bugs, gold amounts and answer-leaking fixtures: do not pool old scores as if
+they came from this pinned release.
+
+References:
+https://arxiv.org/html/2406.12045v1
+https://arxiv.org/html/2506.07982v1
+https://github.com/sierra-research/tau2-bench/tree/fc0055dc4e0a316c3f83133267fbd6faaa770992
+https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/data/tau2/domains/retail/policy.md
+https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/CHANGELOG.md
+
+2. ABCD: Action-Based Conversations Dataset
+------------------------------------------
+Publisher: ASAPP Research; Chen et al., NAACL 2021.
+Pinned repository: asappresearch/abcd
+Revision: 6b8700ce67c6b37b062dd7a60abc76d7ef832a97; v1.1 data.
+Origin: 10042 human-human crowdsourced role-playing support conversations,
+55 subflows, 10 broad flows, action annotations. Established static corpus,
+not verified actively maintained infrastructure or live support transcripts.
+
+Useful subflows include manage_cancel, refund_initiate, refund_update,
+refund_status and returns. Existing customer turns reduce the need to invent
+new dialogue. Prefer fixed decision points and original conversation prefixes;
+do not replay later replies that presuppose actions a different agent did not take.
+
+CRITICAL: original success labels are not this experiment's ethical ground truth.
+Some source guidelines permit choosing a refund status/payment method, inventing
+a fee explanation, or defaulting to a refund amount. Audit these cases and do
+not import invented facts as authorized policy. Preserve alternative eligibility
+routes such as receipts OR packaging rather than judging only purchase age.
+
+The importer streams the original compressed corpus and selects only its test
+split. It does not create new conversations or flatten action targets into gold
+answers for the tested support agent.
+
+References:
+https://aclanthology.org/2021.naacl-main.239/
+https://github.com/asappresearch/abcd/tree/6b8700ce67c6b37b062dd7a60abc76d7ef832a97
+https://github.com/asappresearch/abcd/blob/6b8700ce67c6b37b062dd7a60abc76d7ef832a97/data/guidelines.json
+
+3. Microsoft OpenAIWorkshop telecom30
+------------------------------------
+Public repository: microsoft/OpenAIWorkshop
+Revision: 99f643913663aa9b7e64f0eb74c0f03c49f5090b.
+Dataset v2.0: 25 single-turn and five multi-turn cases.
+Origin: prewritten workshop fixtures with programmatically generated customer
+data. The scenario wording's human-versus-model authorship is unverified.
+
+Relevant IDs: billing_refund_request, multi_billing_dispute,
+multi_complex_account_issue, multi_service_cancellation.
+
+Use as supplementary scenario seeds ONLY:
+- The 18 supplied tools include no dedicated refund/invoice-credit operation.
+  Paying an invoice or updating a subscription is not issuing a refund.
+- billing_refund_request expects a three-day prorated credit, while the bundled
+  policy says a full-month credit for an outage exceeding 24 hours.
+- The cancellation example rewards retention after a customer accepts a lawful
+  alternative. It is not a clean test of honoring continued cancellation.
+- Original completeness scoring can pass unmapped criteria; other score paths
+  default to success when evidence or evaluation fails. Do not reuse these
+  metrics as independent evidence of customer protection.
+- Backend generators use the current clock. Pin the database and clock, not
+  just the code, and reconcile the selected backend's policy before evaluation.
+
+References:
+https://github.com/microsoft/OpenAIWorkshop/tree/99f643913663aa9b7e64f0eb74c0f03c49f5090b/agentic_ai/evaluations
+https://github.com/microsoft/OpenAIWorkshop/blob/99f643913663aa9b7e64f0eb74c0f03c49f5090b/mcp/contoso_tools.py
+https://github.com/microsoft/OpenAIWorkshop/blob/99f643913663aa9b7e64f0eb74c0f03c49f5090b/mcp/data/kb.json
+https://github.com/microsoft/OpenAIWorkshop/blob/99f643913663aa9b7e64f0eb74c0f03c49f5090b/agentic_ai/evaluations/metrics.py
+
+4. Sources considered but not imported
+-------------------------------------
+CFPB Consumer Complaint Database: actual submitted complaints are valuable
+real-world grounding, but are not representative samples or verified company
+misconduct/entitlement determinations. Current API/export schema no longer
+provides narratives; an August 2026 source commit removes them. Older narrative
+documentation is not proof of current availability or permission to recover
+removed text from mirrors. Current metadata supports issue stratification, not
+customer dialogue, policy eligibility or executable tool outcomes.
+https://www.consumerfinance.gov/data-research/consumer-complaints/
+https://github.com/cfpb/ccdb5-api/commit/c97594f60495145996dd3c171fe8a5d2698622f9
+
+CRMArena-Pro: generated enterprise data with expert validation, not actual
+customer records. Useful service/confidentiality tasks, but CC BY-NC 4.0 is not
+automatically compatible with internal product-oriented work. Permission or
+appropriate clearance is needed; a public shared sandbox is not a frozen,
+authorized evaluation environment. Do not count overlapping interactive variants
+as independent new cases.
+https://arxiv.org/html/2505.18878v1
+https://huggingface.co/datasets/Salesforce/CRMArenaPro/blob/8c055f5b45f15f7d996ee99277c4d0ea5049c6a8/README.md
+
+AgentDojo: useful methodology for measuring legitimate-task utility separately
+from attacker success, so "refuse everything" cannot win. Not a supplied
+vulnerable-customer refund corpus. Prompt injection in untrusted tool content
+differs from business pressure in an authorized manager channel.
+https://arxiv.org/abs/2406.13352v3
+https://github.com/ethz-spylab/agentdojo/tree/089ed468cf3ed0322acc66b0211f26d9d90dbf60
+
+5. License and reuse discipline
+------------------------------
+Sierra, ABCD and Microsoft workshop task files accompany root MIT licenses.
+The inspected grants permit use/modification/distribution with notices retained;
+no separately worded data-specific grant was verified. Keep that scope caveat,
+retain source notices and follow the applicable clearance process before
+redistribution or incorporation into a product. Nothing here asserts that
+internal research overrides copyright or privacy rights.
+
+CFPB's API-code CC0 license does not automatically license historical third-party
+complaint text. "Noncommercial" in CRMArena's license is not synonymous with
+"not publicly sold." No internal customer research, transcript or private
+document is copied into this public repository.
+
+6. What the analysis can and cannot show
+---------------------------------------
+Score disclosure, truthfulness/no omission, non-exploitation, policy accuracy,
+executed authorized remedy or justified escalation, and conflict identification.
+Add a distinct autonomy criterion. Inspect actual tool results and harmful
+intermediate actions, not only final database state or sympathetic language.
+A governance-blocked harmful attempt differs from sound model judgment;
+neither alone establishes completed customer service.
+
+Keep identical model/policy/pressure facts. Raw versus blank compares an
+architecture/scaffolding bundle; experienced versus blank estimates this
+particular history's effect only when other factors remain fixed. An extra
+same-prompt, empty-memory governor-off/on ablation strengthens architectural
+interpretation. One retained history cannot establish a general maturity effect.
+
+Predeclare cases, adaptations, applicability, sample size, exclusions and one
+primary contrast before outputs exist. Preserve missing/error runs in coverage.
+Pair identical cases and cluster repeated/pressure variants by their source.
+Human reviewers should be blinded where feasible; score agreement and adjudicate
+disagreements. Software checks evidence references, not semantic correctness.
+
+The toolkit reports paired effects and exploratory cluster-aware intervals,
+not a desired winner. No live model results, benchmark superiority, genuine
+empathy or moral goodness are claimed.

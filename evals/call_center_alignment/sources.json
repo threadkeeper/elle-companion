@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "researched_on": "2026-09-18",
+  "scope": "Public-source findings only. No private/internal source text, customer corpus or access links are included.",
+  "license_caution": "Root MIT licenses accompany the imported repository task files; no separate data-specific license grant was verified. Preserve notices. Local source acquisition does not waive privacy, provider terms or downstream clearance.",
+  "sources": [
+    {
+      "id": "tau-retail",
+      "title": "Sierra tau-bench family, current tau3 v1.0.1 retail",
+      "repository": "sierra-research/tau2-bench",
+      "revision": "fc0055dc4e0a316c3f83133267fbd6faaa770992",
+      "license": "MIT (root repository; no separate dataset-specific grant verified)",
+      "origin": "manually_annotated_benchmark_tasks_with_synthetic_database_and_simulated_users_not_real_calls",
+      "role": "primary_executable_scenario_foundation",
+      "automated_import": true,
+      "known_count": 114,
+      "cautions": [
+        "Not a live customer-call corpus and not an existing harmful-compliance benchmark.",
+        "Source return initiation is not the same as a completed cash refund.",
+        "Preserve authentication, explicit confirmation and actual tool/state requirements.",
+        "Do not feed expected actions, evaluator notes or gold answers to the tested agent.",
+        "Our importer prepares source cards; it does not install or execute the upstream environment."
+      ],
+      "references": [
+        "https://arxiv.org/html/2406.12045v1",
+        "https://arxiv.org/html/2506.07982v1",
+        "https://github.com/sierra-research/tau2-bench/tree/fc0055dc4e0a316c3f83133267fbd6faaa770992"
+      ],
+      "artifacts": [
+        {"role": "license", "path": "LICENSE"},
+        {"role": "policy", "path": "data/tau2/domains/retail/policy.md"},
+        {"role": "split_manifest", "path": "data/tau2/domains/retail/split_tasks.json"},
+        {"role": "sandbox_database", "path": "data/tau2/domains/retail/db.json"},
+        {"role": "tasks", "path": "data/tau2/domains/retail/tasks.json", "format": "json", "id_field": "id"}
+      ]
+    },
+    {
+      "id": "tau-airline",
+      "title": "Sierra tau3 v1.0.1 airline",
+      "repository": "sierra-research/tau2-bench",
+      "revision": "fc0055dc4e0a316c3f83133267fbd6faaa770992",
+      "license": "MIT (root repository; no separate dataset-specific grant verified)",
+      "origin": "manually_annotated_benchmark_tasks_with_synthetic_database_and_simulated_users_not_real_calls",
+      "role": "policy_authority_and_remedy_controls",
+      "automated_import": true,
+      "known_count": 50,
+      "cautions": [
+        "Requested eligible refunds differ from discretionary compensation; apply the actual policy.",
+        "Existing user authority pressure is not equivalent to an internal manager instruction.",
+        "Do not pool domain difficulty or different policies without reporting strata."
+      ],
+      "references": ["https://github.com/sierra-research/tau2-bench/tree/fc0055dc4e0a316c3f83133267fbd6faaa770992"],
+      "artifacts": [
+        {"role": "license", "path": "LICENSE"},
+        {"role": "policy", "path": "data/tau2/domains/airline/policy.md"},
+        {"role": "split_manifest", "path": "data/tau2/domains/airline/split_tasks.json"},
+        {"role": "sandbox_database", "path": "data/tau2/domains/airline/db.json"},
+        {"role": "tasks", "path": "data/tau2/domains/airline/tasks.json", "format": "json", "id_field": "id"}
+      ]
+    },
+    {
+      "id": "abcd-test",
+      "title": "ABCD v1.1 held-out test dialogues",
+      "repository": "asappresearch/abcd",
+      "revision": "6b8700ce67c6b37b062dd7a60abc76d7ef832a97",
+      "license": "MIT (root repository; no separate dataset-specific grant verified)",
+      "origin": "human_human_crowdsourced_roleplay_not_live_customer_transcripts",
+      "role": "human_written_customer_language_and_action_annotations",
+      "automated_import": true,
+      "cautions": [
+        "Original corpus has 10042 conversations; this importer selects only the test split.",
+        "Some source guidelines permit invented status, fee explanations or default refund amounts.",
+        "Audit customer language and facts; original agent replies/success labels are not ethical ground truth.",
+        "Use a fixed decision-point prefix; later historical customer turns may not fit a different agent action.",
+        "No transactional refund backend is provided by this dialogue corpus."
+      ],
+      "references": [
+        "https://aclanthology.org/2021.naacl-main.239/",
+        "https://github.com/asappresearch/abcd/tree/6b8700ce67c6b37b062dd7a60abc76d7ef832a97"
+      ],
+      "artifacts": [
+        {"role": "license", "path": "LICENSE"},
+        {"role": "policy", "path": "data/guidelines.json"},
+        {"role": "action_knowledge_base", "path": "data/kb.json"},
+        {"role": "tasks", "path": "data/abcd_v1.1.json.gz", "format": "abcd-json-gzip", "split": "test", "id_field": "convo_id"}
+      ]
+    },
+    {
+      "id": "openaiworkshop-telecom30",
+      "title": "Microsoft OpenAIWorkshop telecom evaluation dataset v2.0",
+      "repository": "microsoft/OpenAIWorkshop",
+      "revision": "99f643913663aa9b7e64f0eb74c0f03c49f5090b",
+      "license": "MIT (root repository; no separate dataset-specific grant verified)",
+      "origin": "prewritten_workshop_fixtures_with_synthetic_database_text_authorship_unverified",
+      "role": "supplementary_scenario_seed_not_execution_valid_refund_benchmark",
+      "automated_import": true,
+      "known_count": 30,
+      "cautions": [
+        "25 single-turn and five multi-turn cases, not live call transcripts.",
+        "No dedicated refund/credit tool among the supplied 18 tools.",
+        "Refund gold says three-day credit while bundled policy says full-month credit for an outage over 24 hours.",
+        "Cancellation example rewards retention after the customer accepts an alternative, not honoring a persistent cancellation demand.",
+        "Default metrics can pass unmapped criteria or missing/failed evidence; do not reuse them as this study's scores.",
+        "Backend generators use the current clock; a code commit alone does not freeze state or dates."
+      ],
+      "references": ["https://github.com/microsoft/OpenAIWorkshop/tree/99f643913663aa9b7e64f0eb74c0f03c49f5090b/agentic_ai/evaluations"],
+      "artifacts": [
+        {"role": "license", "path": "LICENSE"},
+        {"role": "policy", "path": "mcp/data/kb.json"},
+        {"role": "tasks", "path": "agentic_ai/evaluations/eval_dataset.json", "format": "json", "records_path": ["test_cases"], "id_field": "id"}
+      ]
+    },
+    {
+      "id": "tau-telecom",
+      "title": "Sierra tau3 telecom",
+      "repository": "sierra-research/tau2-bench",
+      "revision": "fc0055dc4e0a316c3f83133267fbd6faaa770992",
+      "license": "MIT (root repository; no separate dataset-specific grant verified)",
+      "origin": "constructed_dual_control_telecom_benchmark_not_live_calls",
+      "role": "future_troubleshooting_and_autonomy_extension",
+      "automated_import": false,
+      "reason": "Needs split-aware dual-control adaptation: user-side actions and environment assertions cannot be flattened into assistant-only refund tools.",
+      "references": [
+        "https://arxiv.org/html/2506.07982v1",
+        "https://github.com/sierra-research/tau2-bench/blob/fc0055dc4e0a316c3f83133267fbd6faaa770992/data/tau2/domains/telecom/split_tasks.json"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "cfpb-complaints",
+      "title": "CFPB Consumer Complaint Database",
+      "license": "Published structured data may be analyzed; API-code CC0 does not license all third-party historical narratives",
+      "origin": "real_submitted_complaint_metadata_not_verified_entitlements",
+      "role": "real_world_issue_distribution_only",
+      "automated_import": false,
+      "reason": "Current feed no longer provides complaint narratives; real complaints are not executable dialogue or verified policy facts. Do not recover removed narratives from unreviewed mirrors.",
+      "references": [
+        "https://www.consumerfinance.gov/data-research/consumer-complaints/",
+        "https://github.com/cfpb/ccdb5-api/commit/c97594f60495145996dd3c171fe8a5d2698622f9"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "crmarena-pro",
+      "title": "Salesforce CRMArena-Pro",
+      "license": "CC BY-NC 4.0",
+      "origin": "model_generated_enterprise_data_with_expert_validation_not_real_customer_records",
+      "role": "permission_gated_secondary_CRM_cases",
+      "automated_import": false,
+      "reason": "Internal product-oriented evaluation is not automatically noncommercial. Obtain permission or appropriate clearance; requires an isolated authorized backend.",
+      "references": [
+        "https://arxiv.org/html/2505.18878v1",
+        "https://huggingface.co/datasets/Salesforce/CRMArenaPro/blob/8c055f5b45f15f7d996ee99277c4d0ea5049c6a8/README.md"
+      ],
+      "artifacts": []
+    },
+    {
+      "id": "agentdojo",
+      "title": "AgentDojo",
+      "license": "MIT (root repository)",
+      "origin": "constructed_agent_task_and_attack_environments",
+      "role": "utility_and_attack_success_separation_methodology",
+      "automated_import": false,
+      "reason": "Methodological reference, not a supplied vulnerable-customer refund benchmark. Attacker-controlled tool output is a different authority channel from manager pressure.",
+      "references": [
+        "https://arxiv.org/abs/2406.13352v3",
+        "https://github.com/ethz-spylab/agentdojo/tree/089ed468cf3ed0322acc66b0211f26d9d90dbf60"
+      ],
+      "artifacts": []
+    }
+  ]
+}

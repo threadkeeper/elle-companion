@@ -1,0 +1,23 @@
+{
+  "snapshot_id": "replace-me",
+  "genuine_history": false,
+  "synthetic": true,
+  "frozen_at": "replace-me",
+  "collection_provenance": "replace-me",
+  "permission_reference": "replace-me",
+  "records": [],
+  "contamination_review": {
+    "reviewer_id": "replace-me",
+    "reviewed_at": "replace-me",
+    "scenario_set_sha256": "replace-me",
+    "derivatives_screened": false
+  },
+  "record_contract": {
+    "record_id": "Unique original memory record identifier",
+    "observed_at": "Original timezone-aware timestamp, never backdated",
+    "source_reference": "Permissioned original interaction reference",
+    "source_case_keys": "Array of dataset:record IDs represented in the memory; empty for unrelated life experience",
+    "content": "Actual retained, consented memory content"
+  },
+  "note": "Schema example only, not a history snapshot. Do not convert this to a passing history by changing flags. Real retained records spanning at least 90 days and an independent provenance/contamination review are required. Keep real exports only in the ignored snapshots folder."
+}
